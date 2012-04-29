@@ -333,14 +333,14 @@ DEBUG_HOST = localhost
 
 # Define programs and commands.
 SHELL = sh
-AVR_PATH = /Applications/Arduino.app/Contents//Resources/Java/hardware/tools/avr/bin/
-CC = $(AVR_PATH)avr-gcc
-OBJCOPY = $(AVR_PATH)avr-objcopy
-OBJDUMP = $(AVR_PATH)avr-objdump
-SIZE = $(AVR_PATH)avr-size
-AR = $(AVR_PATH)avr-ar rcs
-NM = $(AVR_PATH)avr-nm
-AVRDUDE = $(AVR_PATH)avrdude
+AVR_PATH = /Applications/Arduino.app/Contents//Resources/Java/hardware/tools/avr
+CC = $(AVR_PATH)/bin/avr-gcc
+OBJCOPY = $(AVR_PATH)/bin/avr-objcopy
+OBJDUMP = $(AVR_PATH)/bin/avr-objdump
+SIZE = $(AVR_PATH)/bin/avr-size
+AR = $(AVR_PATH)/bin/avr-ar rcs
+NM = $(AVR_PATH)/bin/avr-nm
+AVRDUDE = $(AVR_PATH)/bin/avrdude
 REMOVE = rm -f
 REMOVEDIR = rm -rf
 COPY = cp
@@ -380,6 +380,8 @@ LST = $(SRC:%.c=$(OBJDIR)/%.lst) $(CPPSRC:%.cpp=$(OBJDIR)/%.lst) $(ASRC:%.S=$(OB
 # Compiler flags to generate dependency files.
 GENDEPFLAGS = -MMD -MP -MF .dep/$(@F).d
 
+## Include the files from avr/include/
+#CFLAGS += -I$(AVR_PATH)/include
 
 # Combine all necessary flags and optional flags.
 # Add target processor to flags.

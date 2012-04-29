@@ -33,6 +33,8 @@
 #define USB_SERIAL_PRIVATE_INCLUDE
 #include "usb_serial.h"
 
+#include <usb.h>
+
 
 /**************************************************************************
  *
@@ -146,22 +148,23 @@ static const uint8_t PROGMEM endpoint_config_table[] = {
 // in here should only be done by those who've read chapter 9 of the USB
 // spec and relevant portions of any USB class specifications!
 
-static uint8_t PROGMEM device_descriptor[] = {
-	18,					// bLength
-	1,					// bDescriptorType
-	0x00, 0x02,				// bcdUSB
-	2,					// bDeviceClass
-	0,					// bDeviceSubClass
-	0,					// bDeviceProtocol
-	ENDPOINT0_SIZE,				// bMaxPacketSize0
-	LSB(VENDOR_ID), MSB(VENDOR_ID),		// idVendor
-	LSB(PRODUCT_ID), MSB(PRODUCT_ID),	// idProduct
-	0x00, 0x01,				// bcdDevice
-	1,					// iManufacturer
-	2,					// iProduct
-	3,					// iSerialNumber
-	1					// bNumConfigurations
+static struct usb_device_descriptor PROGMEM device_descriptor = {
+	.bLength		= sizeof(device_descriptor),
+	.bDescriptorType	= 1,
+	.bcdUSB			= 0x0200,
+	.bDeviceClass		= USB_CLASS_COMM,
+	.bDeviceSubClass	= 0,
+	.bDeviceProtocol	= 0,
+	.bMaxPacketSize0	= ENDPOINT0_SIZE,
+	.idVendor		= VENDOR_ID,
+	.idProduct		= PRODUCT_ID,
+	.bcdDevice		= 0x0100,
+	.iManufacturer		= 1,
+	.iProduct		= 2,
+	.iSerialNumber		= 3,
+	.bNumConfigurations	= 1,
 };
+
 
 #define CONFIG1_DESC_SIZE (9+9+5+5+4+5+7+9+7+7)
 static uint8_t PROGMEM config1_descriptor[CONFIG1_DESC_SIZE] = {
@@ -277,7 +280,7 @@ static struct descriptor_list_struct {
 	const uint8_t	*addr;
 	uint8_t		length;
 } PROGMEM descriptor_list[] = {
-	{0x0100, 0x0000, device_descriptor, sizeof(device_descriptor)},
+	{0x0100, 0x0000, (const void *) &device_descriptor, sizeof(device_descriptor)},
 	{0x0200, 0x0000, config1_descriptor, sizeof(config1_descriptor)},
 	{0x0300, 0x0000, (const uint8_t *)&string0, 4},
 	{0x0301, 0x0409, (const uint8_t *)&string1, sizeof(STR_MANUFACTURER)},
