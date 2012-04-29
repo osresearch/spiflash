@@ -333,13 +333,14 @@ DEBUG_HOST = localhost
 
 # Define programs and commands.
 SHELL = sh
-CC = avr-gcc
-OBJCOPY = avr-objcopy
-OBJDUMP = avr-objdump
-SIZE = avr-size
-AR = avr-ar rcs
-NM = avr-nm
-AVRDUDE = avrdude
+AVR_PATH = /Applications/Arduino.app/Contents//Resources/Java/hardware/tools/avr/bin/
+CC = $(AVR_PATH)avr-gcc
+OBJCOPY = $(AVR_PATH)avr-objcopy
+OBJDUMP = $(AVR_PATH)avr-objdump
+SIZE = $(AVR_PATH)avr-size
+AR = $(AVR_PATH)avr-ar rcs
+NM = $(AVR_PATH)avr-nm
+AVRDUDE = $(AVR_PATH)avrdude
 REMOVE = rm -f
 REMOVEDIR = rm -rf
 COPY = cp
