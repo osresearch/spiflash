@@ -1,0 +1,71 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+use Data::Dumper;
+use Device::SerialPort;
+
+my $devfile = "/dev/tty.usbmodem12341";
+my $dev = Device::SerialPort->new($devfile)
+	or die "$devfile: Unable to open $!\n";
+
+my $num_leds = 32 * 5;
+my @pixels = map { [0,0,0] } (1..$num_leds);
+my $sprite = 0;
+
+# Pad the latch command out to 64-bytes
+my $latch = chr(0x00) x 64;
+#my $latch = chr(0x00) x (8 * 3 * int(($num_leds + 63) / 64));
+#$latch .= chr(0x00) x (64 - length($latch) % 64);
+
+
+sub translate_pixel
+{
+	my $c = shift;
+	$c |= 0x80;
+	my $mask = 0x80;
+	my $p = '';
+
+	while ($mask)
+	{
+		if ($c & $mask)
+		{
+			$p .= chr(0xFF);
+		} else {
+			$p .= chr(0x00);
+		}
+
+		$mask >>= 1;
+	}
+
+	return $p;
+}
+
+
+while (1)
+{
+	$pixels[$sprite] = [0,0,0];
+	$sprite = ($sprite - 1 + $num_leds) % $num_leds;
+	$pixels[$sprite] = [0,0x3f,0];
+
+	# Translate the colors array into a merged version per string
+	my $s = '';
+	for my $p (@pixels)
+	{
+		my ($r,$g,$b) = @$p;
+
+		$s .= translate_pixel($g);
+		$s .= translate_pixel($r);
+		$s .= translate_pixel($b);
+	}
+
+	for my $i (0..59)
+	{
+		my $t = substr($s, 64 * $i, 64);
+		$dev->write($t);
+		#sleep(0.001);
+	}
+
+	$dev->write($latch);
+
+	sleep 1.0 / 30;
+}

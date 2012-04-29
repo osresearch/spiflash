@@ -23,6 +23,7 @@
 
 #include <avr/io.h>
 #include <avr/pgmspace.h>
+#include <avr/interrupt.h>
 #include <stdint.h>
 #include <util/delay.h>
 #include "usb_serial.h"
@@ -36,15 +37,107 @@ void send_str(const char *s);
 uint8_t recv_str(char *buf, uint8_t size);
 void parse_and_execute_command(const char *buf, uint8_t num);
 
-#if 0
-// Very simple character echo test
+#if 1
+// Serial to parallel SPI driver
+static
+void send_parallel_byte(
+	const uint8_t c
+)
+{
+	PORTC &= ~(1 << 7);
+
+	PORTB = c;
+
+	PORTC |= 1 << 7;
+}
+
+
+static void
+send_color(
+	const uint8_t color
+)
+{
+	uint8_t c = color | 0x80;
+	uint8_t mask = 0x80;
+
+	while (mask)
+	{
+		if (c & mask)
+			send_parallel_byte(0xFF);
+		else
+			send_parallel_byte(0x00);
+		mask >>= 1;
+	}
+}
+
+
+
 int main(void)
 {
 	CPU_PRESCALE(0);
 	usb_init();
-	while (1) {
-		int n = usb_serial_getchar();
-		if (n >= 0) usb_serial_putchar(n);
+
+	DDRB = 0xFF;
+	DDRC = 1 << 7;
+
+#if 0
+	uint8_t r = 0x01;
+	uint8_t g = 0x30;
+	uint8_t b = 0x01;
+
+	while (1)
+	{
+		uint16_t i;
+		r = (r + 1) & 0x3F;
+
+		for (i = 0 ; i < (32 * 5) ; i++)
+		{
+			send_color(g);
+			send_color(r);
+			send_color(b);
+		}
+
+		for (i = 0 ; i < 64 ; i++)
+		{
+			send_parallel_byte(0x00);
+		}
+
+		for (i = 0 ; i < 65530 ; i++)
+		{
+			asm("nop");
+			asm("nop");
+			asm("nop");
+			asm("nop");
+			asm("nop");
+			asm("nop");
+		}
+	}
+#endif
+	
+
+	while (1)
+	{
+		const int8_t n = usb_serial_available();
+		if (n <= 0)
+			continue;
+
+		const uint8_t irq_flags = SREG;
+		cli();
+
+		int8_t i;
+		for (i = 0 ; i < n ; i++)
+		{
+#define CDC_RX_ENDPOINT		3
+			UENUM = CDC_RX_ENDPOINT;
+			const uint8_t c = UEDATX;
+			send_parallel_byte(c);
+		}
+
+		// Release the USB buffer
+		UEINTX = 0x6B;
+
+		// Re-enabled interrupts
+		SREG = irq_flags;
 	}
 }
 

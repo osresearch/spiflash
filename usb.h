@@ -122,7 +122,7 @@ struct usb_interface_descriptor {
 	uint8_t  bInterfaceProtocol;
 	uint8_t  iInterface;
 
-	struct usb_endpoint_descriptor *endpoint;
+	struct usb_endpoint_descriptor endpoint;
 
 	unsigned char *extra;	/* Extra descriptors */
 	int extralen;
@@ -147,10 +147,12 @@ struct usb_config_descriptor {
 	uint8_t  bmAttributes;
 	uint8_t  MaxPower;
 
-	struct usb_interface *interface;
+	struct usb_interface interfaces[];
 
+#if 0
 	unsigned char *extra;	/* Extra descriptors */
 	int extralen;
+#endif
 };
 
 /* Device descriptor */

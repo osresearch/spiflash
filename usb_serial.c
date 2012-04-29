@@ -167,6 +167,7 @@ static struct usb_device_descriptor PROGMEM device_descriptor = {
 
 
 #define CONFIG1_DESC_SIZE (9+9+5+5+4+5+7+9+7+7)
+#if 1
 static uint8_t PROGMEM config1_descriptor[CONFIG1_DESC_SIZE] = {
 	// configuration descriptor, USB spec 9.6.3, page 264-266, Table 9-10
 	9, 					// bLength;
@@ -242,6 +243,35 @@ static uint8_t PROGMEM config1_descriptor[CONFIG1_DESC_SIZE] = {
 	CDC_TX_SIZE, 0,				// wMaxPacketSize
 	0					// bInterval
 };
+#else
+static struct usb_config_descriptor PROGMEM config1_descriptor = {
+	.bLength		= USB_DT_CONFIG_SIZE,
+	.bDescriptorType	= USB_DT_CONFIG,
+	.wTotalLength		= CONFIG1_DESC_SIZE, // \todo compute
+	.bNumInterfaces		= 2,
+	.bConfigurationValue	= 1, // \todo ?
+	.iConfiguration		= 0, // \todo ?
+	.bmAttributes		= 0xC0, // \todo ?
+	.bMaxPower		= 50, // mA?
+	.interfaces		= {
+		{
+			.bLength		= USB_DT_INTERFACE_SIZE,
+			.bDescriptorType	= USB_DT_INTERFACE,
+			.bInterfaceNumber	= 0,
+			.bAlternateSetting	= 0,
+			.bNumEndPoints		= 0,
+			.bInterfaceClass	= USB_CLASS_COMM,
+			.bInterfaceSubClass	= USB_CLASS_COMM,
+			.bInterfaceProtocol	= 1, // \todo ?
+			.iInterface		= 0,
+			.endpoint		= {
+				.bLength		= USB_
+		},
+		{
+		},
+	},
+};
+#endif
 
 // If you're desperate for a little extra code memory, these strings
 // can be completely removed if iManufacturer, iProduct, iSerialNumber
@@ -406,6 +436,55 @@ void usb_serial_flush_input(void)
 		SREG = intr_state;
 	}
 }
+
+
+#if 0
+/**
+ * Copy the receive buffer into a user space array, of at least 64 bytes.
+ *
+ * \return Number of bytes copied in this packet, 0 if none, -1 on error.
+ */
+int8_t
+usb_serial_recv(
+	uint8_t * buf
+)
+{
+	// interrupts are disabled so these functions can be
+	// used from the main program or interrupt context,
+	// even both in the same program!
+	const uint8_t intr_state = SREG;
+	cli();
+	if (!usb_configuration)
+	{
+		SREG = intr_state;
+		return -1;
+	}
+
+	int offset = 0;
+
+	UENUM = CDC_RX_ENDPOINT;
+	while (1)
+	{
+		if (bit_is_clear(UEINTX, RWAL))
+		{
+			// No data in the buffer .
+			if (bit_is_clear(UEINTX, RXOUTI))
+			{
+				UEINTX = 0x6B;
+				goto retry;
+			}	
+			SREG = intr_state;
+			return -1;
+		}
+
+		// take one byte out of the buffer
+		c = UEDATX;
+		// if buffer completely used, release it
+	if (!(UEINTX & (1<<RWAL))) UEINTX = 0x6B;
+	SREG = intr_state;
+	return c;
+}
+#endif
 
 // transmit a character.  0 returned on success, -1 on error
 int8_t usb_serial_putchar(uint8_t c)
