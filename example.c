@@ -1,24 +1,6 @@
-/* Simple example for Teensy USB Development Board
- * http://www.pjrc.com/teensy/
- * Copyright (c) 2008 PJRC.COM, LLC
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+/**
+ * \file RTTY decoder
+ *
  */
 
 #include <avr/io.h>
@@ -37,111 +19,18 @@ void send_str(const char *s);
 uint8_t recv_str(char *buf, uint8_t size);
 void parse_and_execute_command(const char *buf, uint8_t num);
 
-#if 1
-// Serial to parallel SPI driver
-static
-void send_parallel_byte(
-	const uint8_t c
+static uint8_t
+hexdigit(
+	uint8_t x
 )
 {
-	PORTC &= ~(1 << 7);
-
-	PORTB = c;
-
-	PORTC |= 1 << 7;
+	x &= 0xF;
+	if (x < 0xA)
+		return x + '0' - 0x0;
+	else
+		return x + 'A' - 0xA;
 }
 
-
-static void
-send_color(
-	const uint8_t color
-)
-{
-	uint8_t c = color | 0x80;
-	uint8_t mask = 0x80;
-
-	while (mask)
-	{
-		if (c & mask)
-			send_parallel_byte(0xFF);
-		else
-			send_parallel_byte(0x00);
-		mask >>= 1;
-	}
-}
-
-
-
-int main(void)
-{
-	CPU_PRESCALE(0);
-	usb_init();
-
-	DDRB = 0xFF;
-	DDRC = 1 << 7;
-
-#if 0
-	uint8_t r = 0x01;
-	uint8_t g = 0x30;
-	uint8_t b = 0x01;
-
-	while (1)
-	{
-		uint16_t i;
-		r = (r + 1) & 0x3F;
-
-		for (i = 0 ; i < (32 * 5) ; i++)
-		{
-			send_color(g);
-			send_color(r);
-			send_color(b);
-		}
-
-		for (i = 0 ; i < 64 ; i++)
-		{
-			send_parallel_byte(0x00);
-		}
-
-		for (i = 0 ; i < 65530 ; i++)
-		{
-			asm("nop");
-			asm("nop");
-			asm("nop");
-			asm("nop");
-			asm("nop");
-			asm("nop");
-		}
-	}
-#endif
-	
-
-	while (1)
-	{
-		const int8_t n = usb_serial_available();
-		if (n <= 0)
-			continue;
-
-		const uint8_t irq_flags = SREG;
-		cli();
-
-		int8_t i;
-		for (i = 0 ; i < n ; i++)
-		{
-#define CDC_RX_ENDPOINT		3
-			UENUM = CDC_RX_ENDPOINT;
-			const uint8_t c = UEDATX;
-			send_parallel_byte(c);
-		}
-
-		// Release the USB buffer
-		UEINTX = 0x6B;
-
-		// Re-enabled interrupts
-		SREG = irq_flags;
-	}
-}
-
-#else
 
 // Basic command interpreter for controlling port pins
 int main(void)
@@ -162,10 +51,12 @@ int main(void)
 	while (!usb_configured()) /* wait */ ;
 	_delay_ms(1000);
 
-	while (1) {
+	while (1)
+	{
 		// wait for the user to run their terminal emulator program
 		// which sets DTR to indicate it is ready to receive.
-		while (!(usb_serial_get_control() & USB_SERIAL_DTR)) /* wait */ ;
+		if (!(usb_serial_get_control() & USB_SERIAL_DTR))
+			continue;
 
 		// discard anything that was received prior.  Sometimes the
 		// operating system or other software will send a modem
@@ -173,24 +64,44 @@ int main(void)
 		usb_serial_flush_input();
 
 		// print a nice welcome message
-		send_str(PSTR("\r\nTeensy USB Serial Example, "
-			"Simple Pin Control Shell\r\n\r\n"
-			"Example Commands\r\n"
-			"  B0?   Read Port B, pin 0\r\n"
-			"  C2=0  Write Port C, pin 1 LOW\r\n"
-			"  D6=1  Write Port D, pin 6 HIGH  (D6 is LED pin)\r\n\r\n"));
+		send_str(PSTR("\r\nRTTY decoder\r\n"));
+
+		// Enable ADC and select input ADC0 / F0
+		ADMUX = 0 | (0 << REFS1) | (1 << REFS0);
+		ADCSRA = 0
+			| (1 << ADEN)
+			| (1 << ADSC)
+			| (1 << ADPS2)
+			| (1 << ADPS1)
+			| (1 << ADPS0)
+			;
+		DDRF = 0;
+		DIDR0 = (1 << 0);
 
 		// and then listen for commands and process them
-		while (1) {
-			send_str(PSTR("> "));
-			n = recv_str(buf, sizeof(buf));
-			if (n == 255) break;
-			send_str(PSTR("\r\n"));
-			parse_and_execute_command(buf, n);
+		while (1)
+		{
+			if ((ADCSRA & (1 << ADSC)))
+				continue;
+			//const uint16_t val = ADC;
+			const uint16_t val = ADC;
+			
+			ADCSRA |= (1 << ADSC);
+
+			uint8_t h[] = {
+				hexdigit(val >> 12),
+				hexdigit(val >>  8),
+				hexdigit(val >>  4),
+				hexdigit(val >>  0),
+				'\r',
+				'\n',
+			};
+
+			usb_serial_write(h, sizeof(h));
 		}
 	}
 }
-#endif
+
 
 // Send a string to the USB serial port.  The string must be in
 // flash memory, using PSTR
@@ -205,6 +116,7 @@ void send_str(const char *s)
 	}
 }
 
+#if 0
 // Receive a string from the USB serial port.  The string is stored
 // in the buffer and this function will not exceed the buffer size.
 // A carriage return or newline completes the string, and is not
@@ -306,3 +218,4 @@ void parse_and_execute_command(const char *buf, uint8_t num)
 }
 
 
+#endif
