@@ -32,38 +32,9 @@ hexdigit(
 }
 
 
-// Basic command interpreter for controlling port pins
-int main(void)
+static void
+rtty_pulse_init(void)
 {
-	char buf[32];
-	uint8_t n;
-
-	// set for 16 MHz clock, and turn on the LED
-	CPU_PRESCALE(0);
-	LED_CONFIG;
-	LED_ON;
-
-	// initialize the USB, and then wait for the host
-	// to set configuration.  If the Teensy is powered
-	// without a PC connected to the USB port, this 
-	// will wait forever.
-	usb_init();
-	while (!usb_configured()) /* wait */ ;
-	_delay_ms(1000);
-
-	// wait for the user to run their terminal emulator program
-	// which sets DTR to indicate it is ready to receive.
-	while (!(usb_serial_get_control() & USB_SERIAL_DTR))
-		continue;
-
-	// discard anything that was received prior.  Sometimes the
-	// operating system or other software will send a modem
-	// "AT command", which can still be buffered.
-	usb_serial_flush_input();
-
-	// print a nice welcome message
-	send_str(PSTR("\r\nRTTY decoder\r\n"));
-
 	// Start TCNT1 to count at clk/1
 	TCCR1B = 0
 		| (0 << CS12)
@@ -87,7 +58,15 @@ int main(void)
 		;
 	DDRF = 0;
 	DIDR0 = (1 << 0);
+}
 
+
+/** Blocking read of the incoming pulse.
+ * Returns the length in ticks.
+ */
+static uint16_t
+rtty_pulse_read(void)
+{
 	uint16_t start_crossing = 0;
 
 	while (1)
@@ -114,32 +93,74 @@ int main(void)
 		// of time that we were at zero
 		if (start_crossing == 0)
 			continue;
+
 		uint16_t delta = TCNT1 - start_crossing;
-		start_crossing = 0;
+		return delta;
+	}
+}
+
+
+// Basic command interpreter for controlling port pins
+int main(void)
+{
+	// set for 16 MHz clock, and turn on the LED
+	CPU_PRESCALE(0);
+	LED_CONFIG;
+	LED_ON;
+
+	// initialize the USB, and then wait for the host
+	// to set configuration.  If the Teensy is powered
+	// without a PC connected to the USB port, this 
+	// will wait forever.
+	usb_init();
+	while (!usb_configured()) /* wait */ ;
+	_delay_ms(1000);
+
+	// wait for the user to run their terminal emulator program
+	// which sets DTR to indicate it is ready to receive.
+	while (!(usb_serial_get_control() & USB_SERIAL_DTR))
+		continue;
+
+	// discard anything that was received prior.  Sometimes the
+	// operating system or other software will send a modem
+	// "AT command", which can still be buffered.
+	usb_serial_flush_input();
+
+	// print a nice welcome message
+	send_str(PSTR("\r\nRTTY decoder\r\n"));
+	rtty_pulse_init();
+
+	uint8_t bits = 0;
+	uint8_t byte = 0;
+	uint8_t i = 0;
+
+#define BUFFER_LEN 64
+	uint8_t buf[BUFFER_LEN + 2];
+	buf[BUFFER_LEN + 0] = '\r';
+	buf[BUFFER_LEN + 1] = '\n';
+
+	while (1)
+	{
+		const uint16_t delta = rtty_pulse_read();
 
 		// At 16 MHz, 3000 Hz == 5333 ticks == 0x14D5
 		// We use 0x1600 as an approximate mid point
-/*
 		if (delta < 0x1600)
 			byte = (byte << 1) | 1;
 		else
 			byte = (byte << 1) | 0;
 
-		if ((byte & (1 << 5)) == 0)
+		if (++bits < 4)
 			continue;
-*/
 
-		// We have a five bit code
-		uint8_t h[] = {
-			hexdigit(delta >> 12),
-			hexdigit(delta >>  8),
-			hexdigit(delta >>  4),
-			hexdigit(delta >>  0),
-			'\r',
-			'\n',
-		};
+		buf[i] = hexdigit(byte);
+		byte = bits = 0;
 
-		usb_serial_write(h, sizeof(h));
+		if (++i < BUFFER_LEN)
+			continue;
+		i = 0;
+
+		usb_serial_write(buf, sizeof(buf));
 	}
 }
 
