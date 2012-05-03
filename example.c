@@ -209,20 +209,24 @@ int main(void)
 	buf[BUFFER_LEN + 1] = '\n';
 
 	uint16_t deltas[8];
+	uint8_t old_state = 0;
 
 	while (1)
 	{
+		// Read the pulse width of the input
 		const uint16_t delta = rtty_pulse_read();
-		deltas[i] = delta;
 
-#if 0
-		// At 16 MHz, 3000 Hz == 5333 ticks == 0x14D5
-		// We use 0x1600 as an approximate mid point
-		if (delta < 0x1600)
-			byte = (byte << 1) | 1;
-		else
-			byte = (byte << 1) | 0;
+		// If we have had more than two at the same state,
+		// assume that we are in the new state
+		const uint8_t state = delta > 5200;
+		if (state != old_state)
+		{
+			old_state = state;
+			continue;
+		}
 
+		// Store 8 bits at a time
+		byte = (byte << 1) | state;
 		if (++bits < 4)
 			continue;
 
@@ -231,7 +235,7 @@ int main(void)
 
 		if (++i < BUFFER_LEN)
 			continue;
-#else
+#if 0
 		if (++i < 8)
 			continue;
 
