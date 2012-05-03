@@ -1,12 +1,19 @@
 /**
  * \file RTTY decoder
  *
+ * RTTY rest details:
+ *	http://www.aa5au.com/gettingstarted/rtty_diddles_technical.htm
+ * 45.45 baud -- each bit is 22 ms
+ * Tones are 5500 clock ticks == 2900 Hz (or 1450?)
+ * and 4850 ticks == 3300 Hz (or 1650?).
+ *
  */
 
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
 #include <stdint.h>
+#include <string.h>
 #include <util/delay.h>
 #include "usb_serial.h"
 
@@ -52,12 +59,31 @@ rtty_pulse_init(void)
 	ADCSRA = 0
 		| (1 << ADEN)
 		| (1 << ADSC)
-		| (1 << ADPS2)
+		| (0 << ADPS2)
 		| (1 << ADPS1)
 		| (1 << ADPS0)
 		;
 	DDRF = 0;
 	DIDR0 = (1 << 0);
+}
+
+
+static inline void
+adc_start(void)
+{
+	ADCSRA |= (1 << ADSC);
+}
+
+
+static uint16_t
+adc_read_block(void)
+{
+	// Wait for the conversion to complete
+	while ((ADCSRA & (1 << ADSC)))
+		continue;
+
+	// Read the value
+	return ADC;
 }
 
 
@@ -68,25 +94,28 @@ static uint16_t
 rtty_pulse_read(void)
 {
 	uint16_t start_crossing = 0;
+	uint8_t zero_count = 0; // require at least 8 zeros before triggering
 
 	while (1)
 	{
-		// Wait for the conversion to complete
-		while ((ADCSRA & (1 << ADSC)))
-			continue;
-
-		// Read the value and start the next conversion
-		const uint16_t val = ADC;
-		ADCSRA |= (1 << ADSC);
+		const uint16_t val = adc_read_block();
+		adc_start();
 
 		// If this is the first zero crossing of the cycle,
 		// record the start time of it.
-		if (val < 16)
+		if (val < 8)
 		{
+#if 1
+			if (zero_count++ < 4)
+				continue;
+#endif
 			if (start_crossing == 0)
 				start_crossing = TCNT1;
 			continue;
 		}
+
+		// Non-zero; reset our counter
+		zero_count = 0;
 
 		// If this is the first non-zero reading,
 		// after a period of zero, display the length
@@ -98,6 +127,41 @@ rtty_pulse_read(void)
 		return delta;
 	}
 }
+
+static void
+a16(
+	char * h,
+	uint16_t v
+)
+{
+	h[0] = hexdigit(v >> 12);
+	h[1] = hexdigit(v >>  8);
+	h[2] = hexdigit(v >>  4);
+	h[3] = hexdigit(v >>  0);
+}
+
+
+static void
+adc_loop(void)
+{
+	uint8_t i = 0;
+	uint8_t buf[64];
+	adc_start();
+
+	while (1)
+	{
+		uint16_t val = adc_read_block();
+		adc_start();
+		buf[i++] = val >> 2;
+
+		if (i < sizeof(buf))
+			continue;
+
+		usb_serial_write(buf, sizeof(buf));
+		i = 0;
+	}
+}
+
 
 
 // Basic command interpreter for controlling port pins
@@ -129,20 +193,29 @@ int main(void)
 	// print a nice welcome message
 	send_str(PSTR("\r\nRTTY decoder\r\n"));
 	rtty_pulse_init();
+	adc_start();
 
 	uint8_t bits = 0;
 	uint8_t byte = 0;
 	uint8_t i = 0;
 
+	if (0)
+		adc_loop();
+
 #define BUFFER_LEN 64
-	uint8_t buf[BUFFER_LEN + 2];
+	char buf[BUFFER_LEN + 2];
+	memset(buf, ' ', sizeof(buf));
 	buf[BUFFER_LEN + 0] = '\r';
 	buf[BUFFER_LEN + 1] = '\n';
+
+	uint16_t deltas[8];
 
 	while (1)
 	{
 		const uint16_t delta = rtty_pulse_read();
+		deltas[i] = delta;
 
+#if 0
 		// At 16 MHz, 3000 Hz == 5333 ticks == 0x14D5
 		// We use 0x1600 as an approximate mid point
 		if (delta < 0x1600)
@@ -158,8 +231,21 @@ int main(void)
 
 		if (++i < BUFFER_LEN)
 			continue;
-		i = 0;
+#else
+		if (++i < 8)
+			continue;
 
+		a16(&buf[0*5], deltas[0]);
+		a16(&buf[1*5], deltas[1]);
+		a16(&buf[2*5], deltas[2]);
+		a16(&buf[3*5], deltas[3]);
+		a16(&buf[4*5], deltas[4]);
+		a16(&buf[5*5], deltas[5]);
+		a16(&buf[6*5], deltas[6]);
+		a16(&buf[7*5], deltas[7]);
+#endif
+
+		i = 0;
 		usb_serial_write(buf, sizeof(buf));
 	}
 }
