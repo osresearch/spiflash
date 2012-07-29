@@ -1,12 +1,5 @@
 /**
- * \file RTTY decoder
- *
- * RTTY rest details:
- *	http://www.aa5au.com/gettingstarted/rtty_diddles_technical.htm
- * 45.45 baud -- each bit is 22 ms
- * Tones are 5500 clock ticks == 2900 Hz (or 1450?)
- * and 4850 ticks == 3300 Hz (or 1650?).
- *
+ * \file PROM reader.
  */
 
 #include <avr/io.h>
@@ -39,132 +32,170 @@ hexdigit(
 }
 
 
-static void
-rtty_pulse_init(void)
-{
-	// Start TCNT1 to count at clk/1
-	TCCR1B = 0
-		| (0 << CS12)
-		| (0 << CS11)
-		| (1 << CS10)
-		;
-
-	// Enable ADC and select input ADC0 / F0
-	// RTTY is about 1.5 KHz, so we need to sample at least 3 KHz,
-	// although 10 KHz would give us plenty of extra.
-	// System clock is 16 MHz on teensy, 8 MHz on tiny,
-	// conversions take 13 ticks, so divisor == 128 (1,1,1) should
-	// give 9.6 KHz of samples.
-	ADMUX = 0 | (0 << REFS1) | (1 << REFS0);
-	ADCSRA = 0
-		| (1 << ADEN)
-		| (1 << ADSC)
-		| (0 << ADPS2)
-		| (1 << ADPS1)
-		| (1 << ADPS0)
-		;
-	DDRF = 0;
-	DIDR0 = (1 << 0);
-}
-
-
-static inline void
-adc_start(void)
-{
-	ADCSRA |= (1 << ADSC);
-}
-
-
-static uint16_t
-adc_read_block(void)
-{
-	// Wait for the conversion to complete
-	while ((ADCSRA & (1 << ADSC)))
-		continue;
-
-	// Read the value
-	return ADC;
-}
-
-
-/** Blocking read of the incoming pulse.
- * Returns the length in ticks.
- */
-static uint16_t
-rtty_pulse_read(void)
-{
-	uint16_t start_crossing = 0;
-	uint8_t zero_count = 0; // require at least 8 zeros before triggering
-
-	while (1)
-	{
-		const uint16_t val = adc_read_block();
-		adc_start();
-
-		// If this is the first zero crossing of the cycle,
-		// record the start time of it.
-		if (val < 8)
-		{
-#if 1
-			if (zero_count++ < 4)
-				continue;
-#endif
-			if (start_crossing == 0)
-				start_crossing = TCNT1;
-			continue;
-		}
-
-		// Non-zero; reset our counter
-		zero_count = 0;
-
-		// If this is the first non-zero reading,
-		// after a period of zero, display the length
-		// of time that we were at zero
-		if (start_crossing == 0)
-			continue;
-
-		uint16_t delta = TCNT1 - start_crossing;
-		return delta;
-	}
-}
-
-static void
-a16(
-	char * h,
-	uint16_t v
+static uint8_t
+printable(
+	uint8_t x
 )
 {
-	h[0] = hexdigit(v >> 12);
-	h[1] = hexdigit(v >>  8);
-	h[2] = hexdigit(v >>  4);
-	h[3] = hexdigit(v >>  0);
+	if ('A' <= x && x <= 'Z')
+		return x;
+	if ('a' <= x && x <= 'z')
+		return x;
+	if ('0' <= x && x <= '9')
+		return x;
+	return '.';
 }
+	
 
 
-static void
-adc_loop(void)
+#define ADDR_PORT_0	PORTB
+#define ADDR_DDR_0	DDRB
+#define ADDR_PIN_0	0
+
+#define ADDR_PORT_1	PORTB
+#define ADDR_DDR_1	DDRB
+#define ADDR_PIN_1	1
+
+#define ADDR_PORT_2	PORTB
+#define ADDR_DDR_2	DDRB
+#define ADDR_PIN_2	2
+
+#define ADDR_PORT_3	PORTB
+#define ADDR_DDR_3	DDRB
+#define ADDR_PIN_3	3
+
+#define ADDR_PORT_4	PORTB
+#define ADDR_DDR_4	DDRB
+#define ADDR_PIN_4	7
+
+#define ADDR_PORT_5	PORTD
+#define ADDR_DDR_5	DDRD
+#define ADDR_PIN_5	0
+
+#define ADDR_PORT_6	PORTD
+#define ADDR_DDR_6	DDRD
+#define ADDR_PIN_6	1
+
+#define ADDR_PORT_7	PORTD
+#define ADDR_DDR_7	DDRD
+#define ADDR_PIN_7	2
+
+#define ADDR_PORT_8	PORTD
+#define ADDR_DDR_8	DDRD
+#define ADDR_PIN_8	3
+
+#define ADDR_PORT_9	PORTC
+#define ADDR_DDR_9	DDRC
+#define ADDR_PIN_9	6
+
+#define ADDR_PORT_10	PORTC
+#define ADDR_DDR_10	DDRC
+#define ADDR_PIN_10	7
+
+#define ADDR_PORT_11	PORTD
+#define ADDR_DDR_11	PORTD
+#define ADDR_PIN_11	6
+
+#define ADDR_PORT_12	PORTD
+#define ADDR_DDR_12	PORTD
+#define ADDR_PIN_12	7
+
+
+#define DATA_PORT_0	PORTF
+#define DATA_DDR_0	DDRF
+#define DATA_PIN_0	0
+
+#define DATA_PORT_1	PORTF
+#define DATA_DDR_1	DDRF
+#define DATA_PIN_1	1
+
+#define DATA_PORT_2	PORTF
+#define DATA_DDR_2	DDRF
+#define DATA_PIN_2	4
+
+#define DATA_PORT_3	PORTF
+#define DATA_DDR_3	DDRF
+#define DATA_PIN_3	5
+
+#define DATA_PORT_4	PORTF
+#define DATA_DDR_4	DDRF
+#define DATA_PIN_4	6
+
+#define DATA_PORT_5	PORTF
+#define DATA_DDR_5	DDRF
+#define DATA_PIN_5	7
+
+#define DATA_PORT_6	PORTB
+#define DATA_DDR_6	DDRB
+#define DATA_PIN_6	6
+
+#define DATA_PORT_7	PORTB
+#define DATA_DDR_7	DDRB
+#define DATA_PIN_7	5
+
+
+#define sbi(PORT, PIN) (PORT) |= (1 << (PIN))
+#define cbi(PORT, PIN) (PORT) &= ~(1 << (PIN))
+
+static inline void
+set_address(
+	uint16_t addr
+)
 {
-	uint8_t i = 0;
-	uint8_t buf[64];
-	adc_start();
+#define PORT(X) PORT##X
+#define DDR(X) DDR##X
+#define PIN(X) PIN##X
+#define CAT(X,Y) X##Y
 
-	while (1)
-	{
-		uint16_t val = adc_read_block();
-		adc_start();
-		buf[i++] = val >> 2;
 
-		if (i < sizeof(buf))
-			continue;
+#define ADDR_BIT(ID, bit) do { \
+	if (bit) \
+		sbi(CAT(ADDR_PORT_, ID), CAT(ADDR_PIN_, ID)); \
+	else \
+		cbi(CAT(ADDR_PORT_, ID), CAT(ADDR_PIN_, ID)); \
+} while(0)
 
-		usb_serial_write(buf, sizeof(buf));
-		i = 0;
-	}
+	ADDR_BIT(0, addr & 1); addr >>= 1;
+	ADDR_BIT(1, addr & 1); addr >>= 1;
+	ADDR_BIT(2, addr & 1); addr >>= 1;
+	ADDR_BIT(3, addr & 1); addr >>= 1;
+	ADDR_BIT(4, addr & 1); addr >>= 1;
+	ADDR_BIT(5, addr & 1); addr >>= 1;
+	ADDR_BIT(6, addr & 1); addr >>= 1;
+	ADDR_BIT(7, addr & 1); addr >>= 1;
+	ADDR_BIT(8, addr & 1); addr >>= 1;
+	ADDR_BIT(9, addr & 1); addr >>= 1;
+	ADDR_BIT(10, addr & 1); addr >>= 1;
+	ADDR_BIT(11, addr & 1); addr >>= 1;
+	ADDR_BIT(12, addr & 1); addr >>= 1;
 }
 
 
+static uint8_t
+read_byte(
+	uint16_t addr
+)
+{
+	set_address(addr);
+	_delay_ms(1);
 
-// Basic command interpreter for controlling port pins
+#define DATA_BIT(ID) \
+	(CAT(DATA_PORT_, ID) & (1 << CAT(DATA_PIN_, ID)) ? 1 : 0)
+
+	uint8_t b = 0;
+	b = DATA_BIT(7); b <<= 1;
+	b = DATA_BIT(6); b <<= 1;
+	b = DATA_BIT(5); b <<= 1;
+	b = DATA_BIT(4); b <<= 1;
+	b = DATA_BIT(3); b <<= 1;
+	b = DATA_BIT(2); b <<= 1;
+	b = DATA_BIT(1); b <<= 1;
+	b = DATA_BIT(0);
+
+	return b;
+}
+
+
 int main(void)
 {
 	// set for 16 MHz clock, and turn on the LED
@@ -185,6 +216,36 @@ int main(void)
 	while (!(usb_serial_get_control() & USB_SERIAL_DTR))
 		continue;
 
+	// Configure all of the address pins as outputs
+
+#define SET_DDR(ID) \
+	sbi(CAT(ADDR_DDR_,ID), CAT(ADDR_PIN_,ID))
+#define CLR_DDR(ID) \
+	cbi(CAT(DATA_DDR_,ID), CAT(DATA_PIN_,ID))
+
+	SET_DDR(0);
+	SET_DDR(1);
+	SET_DDR(2);
+	SET_DDR(3);
+	SET_DDR(4);
+	SET_DDR(5);
+	SET_DDR(6);
+	SET_DDR(7);
+	SET_DDR(8);
+	SET_DDR(9);
+	SET_DDR(10);
+	SET_DDR(11);
+	SET_DDR(12);
+
+	CLR_DDR(0);
+	CLR_DDR(1);
+	CLR_DDR(2);
+	CLR_DDR(3);
+	CLR_DDR(4);
+	CLR_DDR(5);
+	CLR_DDR(6);
+	CLR_DDR(7);
+
 	// discard anything that was received prior.  Sometimes the
 	// operating system or other software will send a modem
 	// "AT command", which can still be buffered.
@@ -192,65 +253,28 @@ int main(void)
 
 	// print a nice welcome message
 	send_str(PSTR("\r\nRTTY decoder\r\n"));
-	rtty_pulse_init();
-	adc_start();
 
-	uint8_t bits = 0;
-	uint8_t byte = 0;
-	uint8_t i = 0;
-
-	if (0)
-		adc_loop();
-
-#define BUFFER_LEN 64
-	char buf[BUFFER_LEN + 2];
-	memset(buf, ' ', sizeof(buf));
-	buf[BUFFER_LEN + 0] = '\r';
-	buf[BUFFER_LEN + 1] = '\n';
-
-	uint16_t deltas[8];
-	uint8_t old_state = 0;
+	uint16_t addr = 0;
 
 	while (1)
 	{
-		// Read the pulse width of the input
-		const uint16_t delta = rtty_pulse_read();
+		uint8_t byte = read_byte(addr);
+		char line[32];
+		uint8_t i = 0;
+		line[i++] = hexdigit(addr >> 12);
+		line[i++] = hexdigit(addr >>  8);
+		line[i++] = hexdigit(addr >>  4);
+		line[i++] = hexdigit(addr >>  0);
+		line[i++] = '=';
+		line[i++] = hexdigit(byte >> 4);
+		line[i++] = hexdigit(byte >> 0);
+		line[i++] = ' ';
+		line[i++] = printable(byte);
+		line[i++] = '\r';
+		line[i++] = '\n';
+		usb_serial_write(line, i);
 
-		// If we have had more than two at the same state,
-		// assume that we are in the new state
-		const uint8_t state = delta > 5200;
-		if (state != old_state)
-		{
-			old_state = state;
-			continue;
-		}
-
-		// Store 8 bits at a time
-		byte = (byte << 1) | state;
-		if (++bits < 4)
-			continue;
-
-		buf[i] = hexdigit(byte);
-		byte = bits = 0;
-
-		if (++i < BUFFER_LEN)
-			continue;
-#if 0
-		if (++i < 8)
-			continue;
-
-		a16(&buf[0*5], deltas[0]);
-		a16(&buf[1*5], deltas[1]);
-		a16(&buf[2*5], deltas[2]);
-		a16(&buf[3*5], deltas[3]);
-		a16(&buf[4*5], deltas[4]);
-		a16(&buf[5*5], deltas[5]);
-		a16(&buf[6*5], deltas[6]);
-		a16(&buf[7*5], deltas[7]);
-#endif
-
-		i = 0;
-		usb_serial_write(buf, sizeof(buf));
+		addr++;
 	}
 }
 
