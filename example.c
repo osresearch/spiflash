@@ -38,12 +38,15 @@ printable(
 )
 {
 	if ('A' <= x && x <= 'Z')
-		return x;
+		return 1;
 	if ('a' <= x && x <= 'z')
-		return x;
+		return 1;
 	if ('0' <= x && x <= '9')
-		return x;
-	return '.';
+		return 1;
+	if (x == ' ')
+		return 1;
+
+	return 0;
 }
 	
 
@@ -101,35 +104,35 @@ printable(
 #define ADDR_PIN_12	7
 
 
-#define DATA_PORT_0	PORTF
+#define DATA_PORT_0	PINF
 #define DATA_DDR_0	DDRF
 #define DATA_PIN_0	0
 
-#define DATA_PORT_1	PORTF
+#define DATA_PORT_1	PINF
 #define DATA_DDR_1	DDRF
 #define DATA_PIN_1	1
 
-#define DATA_PORT_2	PORTF
+#define DATA_PORT_2	PINF
 #define DATA_DDR_2	DDRF
 #define DATA_PIN_2	4
 
-#define DATA_PORT_3	PORTF
+#define DATA_PORT_3	PINF
 #define DATA_DDR_3	DDRF
 #define DATA_PIN_3	5
 
-#define DATA_PORT_4	PORTF
+#define DATA_PORT_4	PINF
 #define DATA_DDR_4	DDRF
 #define DATA_PIN_4	6
 
-#define DATA_PORT_5	PORTF
+#define DATA_PORT_5	PINF
 #define DATA_DDR_5	DDRF
 #define DATA_PIN_5	7
 
-#define DATA_PORT_6	PORTB
+#define DATA_PORT_6	PINB
 #define DATA_DDR_6	DDRB
 #define DATA_PIN_6	6
 
-#define DATA_PORT_7	PORTB
+#define DATA_PORT_7	PINB
 #define DATA_DDR_7	DDRB
 #define DATA_PIN_7	5
 
@@ -183,14 +186,14 @@ read_byte(
 	(CAT(DATA_PORT_, ID) & (1 << CAT(DATA_PIN_, ID)) ? 1 : 0)
 
 	uint8_t b = 0;
-	b = DATA_BIT(7); b <<= 1;
-	b = DATA_BIT(6); b <<= 1;
-	b = DATA_BIT(5); b <<= 1;
-	b = DATA_BIT(4); b <<= 1;
-	b = DATA_BIT(3); b <<= 1;
-	b = DATA_BIT(2); b <<= 1;
-	b = DATA_BIT(1); b <<= 1;
-	b = DATA_BIT(0);
+	b |= DATA_BIT(7); b <<= 1;
+	b |= DATA_BIT(6); b <<= 1;
+	b |= DATA_BIT(5); b <<= 1;
+	b |= DATA_BIT(4); b <<= 1;
+	b |= DATA_BIT(3); b <<= 1;
+	b |= DATA_BIT(2); b <<= 1;
+	b |= DATA_BIT(1); b <<= 1;
+	b |= DATA_BIT(0);
 
 	return b;
 }
@@ -258,7 +261,14 @@ int main(void)
 
 	while (1)
 	{
+		addr++;
+		if (addr == 0)
+			send_str(PSTR("wrap\r\n"));
+
 		uint8_t byte = read_byte(addr);
+		if (byte == 0)
+			continue;
+
 		char line[32];
 		uint8_t i = 0;
 		line[i++] = hexdigit(addr >> 12);
@@ -269,12 +279,10 @@ int main(void)
 		line[i++] = hexdigit(byte >> 4);
 		line[i++] = hexdigit(byte >> 0);
 		line[i++] = ' ';
-		line[i++] = printable(byte);
+		line[i++] = printable(byte) ? byte : '.';
 		line[i++] = '\r';
 		line[i++] = '\n';
 		usb_serial_write(line, i);
-
-		addr++;
 	}
 }
 
