@@ -51,6 +51,7 @@ printable(
 	
 
 
+/** \todo Use port_base to map these into an array and avoid the defines */
 #define ADDR_PORT_0	PORTB
 #define ADDR_DDR_0	DDRB
 #define ADDR_PIN_0	0
