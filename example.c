@@ -254,10 +254,11 @@ int main(void)
 	// "AT command", which can still be buffered.
 	usb_serial_flush_input();
 
-	// print a nice welcome message
-	send_str(PSTR("\r\nRTTY decoder\r\n"));
+#if 0
 
 	uint16_t addr = 0;
+	char line[64];
+	uint8_t off = 0;
 
 	while (1)
 	{
@@ -269,21 +270,47 @@ int main(void)
 		if (byte == 0)
 			continue;
 
-		char line[32];
-		uint8_t i = 0;
-		line[i++] = hexdigit(addr >> 12);
-		line[i++] = hexdigit(addr >>  8);
-		line[i++] = hexdigit(addr >>  4);
-		line[i++] = hexdigit(addr >>  0);
-		line[i++] = '=';
-		line[i++] = hexdigit(byte >> 4);
-		line[i++] = hexdigit(byte >> 0);
-		line[i++] = ' ';
-		line[i++] = printable(byte) ? byte : '.';
-		line[i++] = '\r';
-		line[i++] = '\n';
-		usb_serial_write(line, i);
+		if (off == 0)
+		{
+			line[off++] = hexdigit(addr >> 12);
+			line[off++] = hexdigit(addr >>  8);
+			line[off++] = hexdigit(addr >>  4);
+			line[off++] = hexdigit(addr >>  0);
+			line[off++] = '=';
+		}
+
+		if (printable(byte))
+		{
+			line[off++] = byte;
+			if (off < sizeof(line) - 2)
+				continue;
+		} else {
+			line[off++] = hexdigit(byte >> 4);
+			line[off++] = hexdigit(byte >> 0);
+		}
+
+		line[off++] = '\r';
+		line[off++] = '\n';
+		usb_serial_write(line, off);
+		off = 0;
 	}
+#else
+	uint16_t addr = 0;
+	while (1)
+	{
+		if (addr == 0)
+		{
+			// wait for input
+			while (!usb_serial_available())
+				continue;
+			while (usb_serial_available())
+				usb_serial_getchar();
+		}
+	
+		uint8_t byte = read_byte(addr++);
+		usb_serial_putchar(byte);
+	}
+#endif
 }
 
 
