@@ -180,7 +180,16 @@ read_byte(
 )
 {
 	set_address(addr);
-	_delay_ms(1);
+	for(uint8_t i = 0 ; i < 255; i++)
+	{
+		asm("nop");
+		asm("nop");
+		asm("nop");
+		asm("nop");
+		asm("nop");
+		asm("nop");
+		asm("nop");
+	}
 
 #define DATA_BIT(ID) \
 	(CAT(DATA_PORT_, ID) & (1 << CAT(DATA_PIN_, ID)) ? 1 : 0)
@@ -253,6 +262,8 @@ int main(void)
 	// operating system or other software will send a modem
 	// "AT command", which can still be buffered.
 	usb_serial_flush_input();
+
+	send_str(PSTR("Press enter to dump\r\n"));
 
 #if 0
 
