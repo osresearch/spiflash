@@ -1,5 +1,7 @@
 /**
- * \file PROM reader.
+ * \file PROM dancer
+ *
+ * Read up to 40 pin DIP PROMs using a Teensy++ 2.0
  */
 
 #include <avr/io.h>
@@ -9,6 +11,7 @@
 #include <string.h>
 #include <util/delay.h>
 #include "usb_serial.h"
+#include "bits.h"
 
 #define LED_CONFIG	(DDRD |= (1<<6))
 #define LED_ON		(PORTD |= (1<<6))
@@ -169,9 +172,6 @@ printable(
 #define DATA_DDR_7	DDRF
 #define DATA_PIN_7	1
 
-
-#define sbi(PORT, PIN) (PORT) |= (1 << (PIN))
-#define cbi(PORT, PIN) (PORT) &= ~(1 << (PIN))
 
 static inline void
 set_address(

@@ -46,6 +46,7 @@ TARGET = prom
 
 # List C source files here. (C dependencies are automatically generated.)
 SRC =	$(TARGET).c \
+	bits.c \
 	usb_serial.c \
 
 
@@ -53,9 +54,9 @@ SRC =	$(TARGET).c \
 # type "make clean" after changing this, so all files will be rebuilt
 #
 #MCU = at90usb162       # Teensy 1.0
-MCU = atmega32u4        # Teensy 2.0
+#MCU = atmega32u4        # Teensy 2.0
 #MCU = at90usb646       # Teensy++ 1.0
-#MCU = at90usb1286      # Teensy++ 2.0
+MCU = at90usb1286      # Teensy++ 2.0
 
 
 # Processor frequency.
