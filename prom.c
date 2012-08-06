@@ -50,6 +50,26 @@ printable(
 }
 	
 
+/** Colors
+ * 0 White
+ * 1 Gray
+ * 2 Purple
+ * 3 Blue
+ * 4 Green
+ * 5 Yellow
+ * 6 Orange
+ * 7 Brown
+ *
+ * 8 White
+ * 9 Gray
+ *10 Purple
+ *11 Blue
+ *12 Green
+ *13 Yellow
+ *14 Orange
+ *15 Brown
+ */
+
 
 /** \todo Use port_base to map these into an array and avoid the defines */
 #define ADDR_PORT_0	PORTB
@@ -64,62 +84,74 @@ printable(
 #define ADDR_DDR_2	DDRB
 #define ADDR_PIN_2	2
 
-#define ADDR_PORT_3	PORTB
-#define ADDR_DDR_3	DDRB
-#define ADDR_PIN_3	3
+#define ADDR_PORT_3	PORTE
+#define ADDR_DDR_3	DDRE
+#define ADDR_PIN_3	6
 
 #define ADDR_PORT_4	PORTB
 #define ADDR_DDR_4	DDRB
-#define ADDR_PIN_4	7
+#define ADDR_PIN_4	3
 
-#define ADDR_PORT_5	PORTD
-#define ADDR_DDR_5	DDRD
-#define ADDR_PIN_5	0
+#define ADDR_PORT_5	PORTB
+#define ADDR_DDR_5	DDRB
+#define ADDR_PIN_5	7
 
 #define ADDR_PORT_6	PORTD
 #define ADDR_DDR_6	DDRD
-#define ADDR_PIN_6	1
+#define ADDR_PIN_6	0
 
 #define ADDR_PORT_7	PORTD
 #define ADDR_DDR_7	DDRD
-#define ADDR_PIN_7	2
+#define ADDR_PIN_7	1
 
 #define ADDR_PORT_8	PORTD
 #define ADDR_DDR_8	DDRD
-#define ADDR_PIN_8	3
+#define ADDR_PIN_8	2
 
-#define ADDR_PORT_9	PORTC
-#define ADDR_DDR_9	DDRC
-#define ADDR_PIN_9	6
+#define ADDR_PORT_9	PORTD
+#define ADDR_DDR_9	DDRD
+#define ADDR_PIN_9	3
 
 #define ADDR_PORT_10	PORTC
 #define ADDR_DDR_10	DDRC
-#define ADDR_PIN_10	7
+#define ADDR_PIN_10	6
 
-#define ADDR_PORT_11	PORTD
-#define ADDR_DDR_11	PORTD
-#define ADDR_PIN_11	6
+#define ADDR_PORT_11	PORTC
+#define ADDR_DDR_11	DDRC
+#define ADDR_PIN_11	7
 
 #define ADDR_PORT_12	PORTD
 #define ADDR_DDR_12	PORTD
-#define ADDR_PIN_12	7
+#define ADDR_PIN_12	5
+
+#define ADDR_PORT_13	PORTD
+#define ADDR_DDR_13	PORTD
+#define ADDR_PIN_13	4
+
+#define ADDR_PORT_14	PORTD
+#define ADDR_DDR_14	PORTD
+#define ADDR_PIN_14	6
+
+#define ADDR_PORT_15	PORTD
+#define ADDR_DDR_15	PORTD
+#define ADDR_PIN_15	7
 
 
-#define DATA_PORT_0	PINF
-#define DATA_DDR_0	DDRF
-#define DATA_PIN_0	0
+#define DATA_PORT_0	PINB
+#define DATA_DDR_0	DDRB
+#define DATA_PIN_0	4
 
-#define DATA_PORT_1	PINF
-#define DATA_DDR_1	DDRF
-#define DATA_PIN_1	1
+#define DATA_PORT_1	PINB
+#define DATA_DDR_1	DDRB
+#define DATA_PIN_1	5
 
-#define DATA_PORT_2	PINF
-#define DATA_DDR_2	DDRF
-#define DATA_PIN_2	4
+#define DATA_PORT_2	PINB
+#define DATA_DDR_2	DDRB
+#define DATA_PIN_2	6
 
 #define DATA_PORT_3	PINF
 #define DATA_DDR_3	DDRF
-#define DATA_PIN_3	5
+#define DATA_PIN_3	7
 
 #define DATA_PORT_4	PINF
 #define DATA_DDR_4	DDRF
@@ -127,15 +159,15 @@ printable(
 
 #define DATA_PORT_5	PINF
 #define DATA_DDR_5	DDRF
-#define DATA_PIN_5	7
+#define DATA_PIN_5	5
 
-#define DATA_PORT_6	PINB
-#define DATA_DDR_6	DDRB
-#define DATA_PIN_6	6
+#define DATA_PORT_6	PINF
+#define DATA_DDR_6	DDRF
+#define DATA_PIN_6	4
 
-#define DATA_PORT_7	PINB
-#define DATA_DDR_7	DDRB
-#define DATA_PIN_7	5
+#define DATA_PORT_7	PINF
+#define DATA_DDR_7	DDRF
+#define DATA_PIN_7	1
 
 
 #define sbi(PORT, PIN) (PORT) |= (1 << (PIN))
@@ -172,6 +204,11 @@ set_address(
 	ADDR_BIT(10, addr & 1); addr >>= 1;
 	ADDR_BIT(11, addr & 1); addr >>= 1;
 	ADDR_BIT(12, addr & 1); addr >>= 1;
+	ADDR_BIT(13, addr & 1); addr >>= 1;
+	//ADDR_BIT(14, addr & 1); addr >>= 1;
+	//ADDR_BIT(15, addr & 1); addr >>= 1;
+	ADDR_BIT(14, 1); addr >>= 1;
+	ADDR_BIT(15, 1); addr >>= 1;
 }
 
 
@@ -183,12 +220,6 @@ read_byte(
 	set_address(addr);
 	for(uint8_t i = 0 ; i < 255; i++)
 	{
-		asm("nop");
-		asm("nop");
-		asm("nop");
-		asm("nop");
-		asm("nop");
-		asm("nop");
 		asm("nop");
 	}
 
@@ -249,6 +280,9 @@ int main(void)
 	SET_DDR(10);
 	SET_DDR(11);
 	SET_DDR(12);
+	SET_DDR(13);
+	SET_DDR(14);
+	SET_DDR(15);
 
 	CLR_DDR(0);
 	CLR_DDR(1);
@@ -314,7 +348,13 @@ int main(void)
 		{
 			// wait for input
 			while (!usb_serial_available())
-				continue;
+			{
+				LED_OFF;
+				_delay_ms(50);
+				LED_ON;
+				_delay_ms(50);
+			}
+
 			while (usb_serial_available())
 				usb_serial_getchar();
 		}
