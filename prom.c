@@ -96,6 +96,7 @@ static const uint8_t ports[] = {
 
 typedef struct
 {
+	char name[16];
 	uint8_t pins;
 	uint8_t addr_width;
 	uint8_t data_width;
@@ -112,6 +113,7 @@ typedef struct
  * some hi, some low
  */
 static const prom_t prom_m27c512 = {
+	.name		= "M27C512",
 	.pins		= 28,
 
 	.addr_width	= 16,
@@ -130,6 +132,7 @@ static const prom_t prom_m27c512 = {
 
 
 static const prom_t prom_m27c256 = {
+	.name		= "M27C256",
 	.pins		= 28,
 	.addr_width	= 15,
 	.addr_pins	= {
@@ -146,7 +149,7 @@ static const prom_t prom_m27c256 = {
 
 
 /** Select one of the chips */
-#define prom prom_m27c256
+static const prom_t * prom = &prom_m27c256;
 
 
 static inline uint8_t
@@ -154,10 +157,10 @@ chip_pin(
 	const uint8_t pin
 )
 {
-	if (pin <= prom.pins / 2)
+	if (pin <= prom->pins / 2)
 		return ports[pin];
 	else
-		return ports[pin + 40 - prom.pins];
+		return ports[pin + 40 - prom->pins];
 }
 		
 
@@ -166,9 +169,9 @@ set_address(
 	uint16_t addr
 )
 {
-	for (uint8_t i = 0 ; i < prom.addr_width ; i++)
+	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
 	{
-		out(chip_pin(prom.addr_pins[i]), addr & 1);
+		out(chip_pin(prom->addr_pins[i]), addr & 1);
 		addr >>= 1;
 	}
 }
@@ -189,13 +192,142 @@ read_byte(
 	}
 
 	uint8_t b = 0;
-	for (uint8_t i = 0 ; i < prom.data_width  ; i++)
+	for (uint8_t i = 0 ; i < prom->data_width  ; i++)
 	{
-		uint8_t bit = in(chip_pin(prom.data_pins[i])) ? 0x80 : 0;
+		uint8_t bit = in(chip_pin(prom->data_pins[i])) ? 0x80 : 0;
 		b = (b >> 1) | bit;
 	}
 
 	return b;
+}
+
+
+static uint8_t
+usb_serial_getchar_block(void)
+{
+	while (1)
+	{
+		while (usb_serial_available() == 0)
+			continue;
+
+		uint16_t c = usb_serial_getchar();
+		if (c != -1)
+			return c;
+	}
+}
+
+
+typedef struct
+{
+	uint8_t soh;
+	uint8_t block_num;
+	uint8_t block_num_complement;
+	uint8_t data[128];
+	uint8_t cksum;
+} __attribute__((__packed__))
+xmodem_block_t;
+
+#define XMODEM_SOH 0x01
+#define XMODEM_EOT 0x04
+#define XMODEM_ACK 0x06
+#define XMODEM_CAN 0x18
+#define XMODEM_C 0x43
+#define XMODEM_NACK 0x15
+#define XMODEM_EOF 0x18
+
+
+/** Send a block.
+ * Compute the checksum and complement.
+ *
+ * \return 0 if all is ok, -1 if a cancel is requested or more
+ * than 10 retries occur.
+ */
+static int
+xmodem_send_block(
+	xmodem_block_t * const block
+)
+{
+	// Compute the checksum and complement
+	uint8_t cksum = 0;
+	for (uint8_t i = 0 ; i < sizeof(block->data) ; i++)
+		cksum += block->data[i];
+	block->cksum = cksum;
+	block->block_num_complement = 0xFF - block->block_num;
+
+	// Send the block, and wait for an ACK
+	uint8_t retry_count = 0;
+	goto send_block;
+
+	while (retry_count++ < 10)
+	{
+		uint8_t c = usb_serial_getchar_block();
+		if (c == XMODEM_ACK)
+			return 0;
+		if (c == XMODEM_CAN)
+			return -1;
+		if (c != XMODEM_NACK)
+			continue;
+
+		send_block:
+		usb_serial_write((void*) block, sizeof(*block));
+	}
+
+	// Failure or cancel
+	return -1;
+}
+
+
+/** Send the entire PROM memory */
+static void
+xmodem_send(void)
+{
+	uint8_t c;
+	uint16_t addr = 0;
+	static xmodem_block_t block;
+
+	block.soh = 0x01;
+	block.block_num = 0x00;
+
+	// wait for initial nak
+	while (1)
+	{
+		c = usb_serial_getchar_block();
+		if (c == XMODEM_NACK)
+			break;
+		if (c == XMODEM_CAN)
+			return;
+	}
+
+	// Start sending!
+	while (1)
+	{
+		block.block_num++;
+		for (uint8_t off = 0 ; off < sizeof(block.data) ; off++)
+			block.data[off] = read_byte(addr++);
+
+		if (xmodem_send_block(&block) < 0)
+			return;
+
+		// If we have wrapped the address, we are done
+		if (addr == 0)
+			break;
+	}
+
+	block.block_num++;
+	memset(block.data, XMODEM_EOF, sizeof(block.data));
+	if (xmodem_send_block(&block) < 0)
+		return;
+
+	// File transmission complete.  send an EOT
+	while (1)
+	{
+		c = usb_serial_getchar_block();
+		if (c == XMODEM_ACK
+		||  c == XMODEM_CAN)
+			break;
+
+		usb_serial_putchar(XMODEM_EOT);
+	}
 }
 
 
@@ -219,26 +351,26 @@ int main(void)
 		continue;
 
 	// Configure all of the address pins as outputs
-	for (uint8_t i = 0 ; i < prom.addr_width ; i++)
-		ddr(chip_pin(prom.addr_pins[i]), 1);
+	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
+		ddr(chip_pin(prom->addr_pins[i]), 1);
 
 	// Configure all of the data pins as inputs
-	for (uint8_t i = 0 ; i < prom.data_width ; i++)
-		ddr(chip_pin(prom.data_pins[i]), 0);
+	for (uint8_t i = 0 ; i < prom->data_width ; i++)
+		ddr(chip_pin(prom->data_pins[i]), 0);
 
 	// Configure all of the hi and low pins as outputs
-	for (uint8_t i = 0 ; i < array_count(prom.hi_pins) ; i++)
+	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
 	{
-		uint8_t pin = chip_pin(prom.hi_pins[i]);
+		uint8_t pin = chip_pin(prom->hi_pins[i]);
 		if (pin == 0)
 			continue;
 		out(pin, 1);
 		ddr(pin, 1);
 	}
 
-	for (uint8_t i = 0 ; i < array_count(prom.lo_pins) ; i++)
+	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
 	{
-		uint8_t pin = chip_pin(prom.lo_pins[i]);
+		uint8_t pin = chip_pin(prom->lo_pins[i]);
 		if (pin == 0)
 			continue;
 		out(pin, 0);
@@ -254,12 +386,12 @@ int main(void)
 	usb_serial_flush_input();
 
 
-#if 1
+#if 0
 	uint16_t addr = 0;
 	char line[64];
 	uint8_t off = 0;
 
-	send_str(PSTR(STR(prom) ": Looking for strings\r\n"));
+	send_str(PSTR("Looking for strings\r\n"));
 
 	while (1)
 	{
@@ -296,25 +428,24 @@ int main(void)
 		off = 0;
 	}
 #else
-	send_str(PSTR("Press enter to dump\r\n"));
-	uint16_t addr = 0;
 	while (1)
 	{
-		if (addr == 0)
-		{
-			// wait for input
-			while (!usb_serial_available())
-			{
-				_delay_ms(50);
-				_delay_ms(50);
-			}
+		send_str(PSTR("Start your xmodem receive\r\n"));
 
-			while (usb_serial_available())
-				usb_serial_getchar();
+/*
+		// wait for input
+		while (!usb_serial_available())
+		{
+			_delay_ms(50);
 		}
+
+		// clean out the buffer
+		while (usb_serial_available())
+			usb_serial_getchar();
+*/
 	
-		uint8_t byte = read_byte(addr++);
-		usb_serial_putchar(byte);
+		// And now send it
+		xmodem_send();
 	}
 #endif
 }
