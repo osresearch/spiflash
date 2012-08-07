@@ -13,11 +13,6 @@
 #include "usb_serial.h"
 #include "bits.h"
 
-#define LED_CONFIG	(DDRD |= (1<<6))
-#define LED_ON		(PORTD |= (1<<6))
-#define LED_OFF		(PORTD &= ~(1<<6))
-#define CPU_PRESCALE(n) (CLKPR = 0x80, CLKPR = (n))
-
 void send_str(const char *s);
 uint8_t recv_str(char *buf, uint8_t size);
 void parse_and_execute_command(const char *buf, uint8_t num);
@@ -53,162 +48,106 @@ printable(
 }
 	
 
-/** Colors
- * 0 White
- * 1 Gray
- * 2 Purple
- * 3 Blue
- * 4 Green
- * 5 Yellow
- * 6 Orange
- * 7 Brown
- *
- * 8 White
- * 9 Gray
- *10 Purple
- *11 Blue
- *12 Green
- *13 Yellow
- *14 Orange
- *15 Brown
+static const uint8_t ports[] = {
+	[ 1]	= 0xB6,
+	[ 2]	= 0xB5,
+	[ 3]	= 0xB4,
+	[ 4]	= 0xB3,
+	[ 5]	= 0xB2,
+	[ 6]	= 0xB1,
+	[ 7]	= 0xB0,
+	[ 8]	= 0xE7,
+	[ 9]	= 0xE6,
+	[10]	= 0xA2,
+	[11]	= 0xA1,
+	[12]	= 0xF0,
+	[13]	= 0xF1,
+	[14]	= 0xF2,
+	[15]	= 0xF3,
+	[16]	= 0xF4,
+	[17]	= 0xF5,
+	[18]	= 0xF6,
+	[19]	= 0xF7,
+	[20]	= 0xA3,
+
+	[21]	= 0xA7,
+	[22]	= 0xC7,
+	[23]	= 0xC6,
+	[24]	= 0xC5,
+	[25]	= 0xC4,
+	[26]	= 0xC3,
+	[27]	= 0xC2,
+	[28]	= 0xC1,
+	[29]	= 0xC0,
+	[30]	= 0xE1,
+	[31]	= 0xE0,
+	[32]	= 0xD7,
+	[33]	= 0xD6,
+	[34]	= 0xD5,
+	[35]	= 0xD4,
+	[36]	= 0xD3,
+	[37]	= 0xD2,
+	[38]	= 0xD1,
+	[39]	= 0xD0,
+	[40]	= 0xB7,
+};
+
+
+/** M27C512
+ * 28 total pins
+ * 16 pins of address,
+ * 8 pins of data,
+ * some hi, some low
  */
+static const uint8_t chip_pins = 28;
+
+static const uint8_t addr_pins[] = 
+{
+	10, 9, 8, 7, 6, 5, 4, 3, 25, 24, 21, 23, 2, 26, 27, 1
+};
+
+static const uint8_t data_pins[] =
+{
+	11, 12, 13, 15, 16, 17, 18, 19,
+};
+
+static const uint8_t hi_pins[] =
+{
+	28,
+};
+
+static const uint8_t low_pins[] =
+{
+	22, 20, 14,
+};
 
 
-/** \todo Use port_base to map these into an array and avoid the defines */
-#define ADDR_PORT_0	PORTB
-#define ADDR_DDR_0	DDRB
-#define ADDR_PIN_0	0
 
-#define ADDR_PORT_1	PORTB
-#define ADDR_DDR_1	DDRB
-#define ADDR_PIN_1	1
+/** Manipulate pins, based on the total number of pins */
+#define array_count(X) (sizeof(X) / sizeof(*X))
 
-#define ADDR_PORT_2	PORTB
-#define ADDR_DDR_2	DDRB
-#define ADDR_PIN_2	2
+static inline uint8_t
+chip_pin(
+	const uint8_t pin
+)
+{
+	if (pin <= chip_pins / 2)
+		return ports[pin];
+	else
+		return ports[pin + 40 - chip_pins];
+}
+		
 
-#define ADDR_PORT_3	PORTE
-#define ADDR_DDR_3	DDRE
-#define ADDR_PIN_3	6
-
-#define ADDR_PORT_4	PORTB
-#define ADDR_DDR_4	DDRB
-#define ADDR_PIN_4	3
-
-#define ADDR_PORT_5	PORTB
-#define ADDR_DDR_5	DDRB
-#define ADDR_PIN_5	7
-
-#define ADDR_PORT_6	PORTD
-#define ADDR_DDR_6	DDRD
-#define ADDR_PIN_6	0
-
-#define ADDR_PORT_7	PORTD
-#define ADDR_DDR_7	DDRD
-#define ADDR_PIN_7	1
-
-#define ADDR_PORT_8	PORTD
-#define ADDR_DDR_8	DDRD
-#define ADDR_PIN_8	2
-
-#define ADDR_PORT_9	PORTD
-#define ADDR_DDR_9	DDRD
-#define ADDR_PIN_9	3
-
-#define ADDR_PORT_10	PORTC
-#define ADDR_DDR_10	DDRC
-#define ADDR_PIN_10	6
-
-#define ADDR_PORT_11	PORTC
-#define ADDR_DDR_11	DDRC
-#define ADDR_PIN_11	7
-
-#define ADDR_PORT_12	PORTD
-#define ADDR_DDR_12	PORTD
-#define ADDR_PIN_12	5
-
-#define ADDR_PORT_13	PORTD
-#define ADDR_DDR_13	PORTD
-#define ADDR_PIN_13	4
-
-#define ADDR_PORT_14	PORTD
-#define ADDR_DDR_14	PORTD
-#define ADDR_PIN_14	6
-
-#define ADDR_PORT_15	PORTD
-#define ADDR_DDR_15	PORTD
-#define ADDR_PIN_15	7
-
-
-#define DATA_PORT_0	PINB
-#define DATA_DDR_0	DDRB
-#define DATA_PIN_0	4
-
-#define DATA_PORT_1	PINB
-#define DATA_DDR_1	DDRB
-#define DATA_PIN_1	5
-
-#define DATA_PORT_2	PINB
-#define DATA_DDR_2	DDRB
-#define DATA_PIN_2	6
-
-#define DATA_PORT_3	PINF
-#define DATA_DDR_3	DDRF
-#define DATA_PIN_3	7
-
-#define DATA_PORT_4	PINF
-#define DATA_DDR_4	DDRF
-#define DATA_PIN_4	6
-
-#define DATA_PORT_5	PINF
-#define DATA_DDR_5	DDRF
-#define DATA_PIN_5	5
-
-#define DATA_PORT_6	PINF
-#define DATA_DDR_6	DDRF
-#define DATA_PIN_6	4
-
-#define DATA_PORT_7	PINF
-#define DATA_DDR_7	DDRF
-#define DATA_PIN_7	1
-
-
-static inline void
+static void
 set_address(
 	uint16_t addr
 )
 {
-#define PORT(X) PORT##X
-#define DDR(X) DDR##X
-#define PIN(X) PIN##X
-#define CAT(X,Y) X##Y
-
-
-#define ADDR_BIT(ID, bit) do { \
-	if (bit) \
-		sbi(CAT(ADDR_PORT_, ID), CAT(ADDR_PIN_, ID)); \
-	else \
-		cbi(CAT(ADDR_PORT_, ID), CAT(ADDR_PIN_, ID)); \
-} while(0)
-
-	ADDR_BIT(0, addr & 1); addr >>= 1;
-	ADDR_BIT(1, addr & 1); addr >>= 1;
-	ADDR_BIT(2, addr & 1); addr >>= 1;
-	ADDR_BIT(3, addr & 1); addr >>= 1;
-	ADDR_BIT(4, addr & 1); addr >>= 1;
-	ADDR_BIT(5, addr & 1); addr >>= 1;
-	ADDR_BIT(6, addr & 1); addr >>= 1;
-	ADDR_BIT(7, addr & 1); addr >>= 1;
-	ADDR_BIT(8, addr & 1); addr >>= 1;
-	ADDR_BIT(9, addr & 1); addr >>= 1;
-	ADDR_BIT(10, addr & 1); addr >>= 1;
-	ADDR_BIT(11, addr & 1); addr >>= 1;
-	ADDR_BIT(12, addr & 1); addr >>= 1;
-	ADDR_BIT(13, addr & 1); addr >>= 1;
-	//ADDR_BIT(14, addr & 1); addr >>= 1;
-	//ADDR_BIT(15, addr & 1); addr >>= 1;
-	ADDR_BIT(14, 1); addr >>= 1;
-	ADDR_BIT(15, 1); addr >>= 1;
+	for (uint8_t i = 0 ; i < array_count(addr_pins) ; i++)
+	{
+		out(chip_pin(addr_pins[i]), addr & 1);
+		addr >>= 1;
+	}
 }
 
 
@@ -221,20 +160,17 @@ read_byte(
 	for(uint8_t i = 0 ; i < 255; i++)
 	{
 		asm("nop");
+		asm("nop");
+		asm("nop");
+		asm("nop");
 	}
 
-#define DATA_BIT(ID) \
-	(CAT(DATA_PORT_, ID) & (1 << CAT(DATA_PIN_, ID)) ? 1 : 0)
-
 	uint8_t b = 0;
-	b |= DATA_BIT(7); b <<= 1;
-	b |= DATA_BIT(6); b <<= 1;
-	b |= DATA_BIT(5); b <<= 1;
-	b |= DATA_BIT(4); b <<= 1;
-	b |= DATA_BIT(3); b <<= 1;
-	b |= DATA_BIT(2); b <<= 1;
-	b |= DATA_BIT(1); b <<= 1;
-	b |= DATA_BIT(0);
+	for (uint8_t i = 0 ; i < 8 ; i++)
+	{
+		uint8_t bit = in(chip_pin(data_pins[i])) ? 0x80 : 0;
+		b = (b >> 1) | bit;
+	}
 
 	return b;
 }
@@ -242,10 +178,9 @@ read_byte(
 
 int main(void)
 {
-	// set for 16 MHz clock, and turn on the LED
+	// set for 16 MHz clock
+#define CPU_PRESCALE(n) (CLKPR = 0x80, CLKPR = (n))
 	CPU_PRESCALE(0);
-	LED_CONFIG;
-	LED_ON;
 
 	// initialize the USB, and then wait for the host
 	// to set configuration.  If the Teensy is powered
@@ -261,37 +196,28 @@ int main(void)
 		continue;
 
 	// Configure all of the address pins as outputs
+	for (uint8_t i = 0 ; i < array_count(addr_pins) ; i++)
+		ddr(chip_pin(addr_pins[i]), 1);
 
-#define SET_DDR(ID) \
-	sbi(CAT(ADDR_DDR_,ID), CAT(ADDR_PIN_,ID))
-#define CLR_DDR(ID) \
-	cbi(CAT(DATA_DDR_,ID), CAT(DATA_PIN_,ID))
+	// Configure all of the data pins as inputs
+	for (uint8_t i = 0 ; i < array_count(data_pins) ; i++)
+		ddr(chip_pin(data_pins[i]), 0);
 
-	SET_DDR(0);
-	SET_DDR(1);
-	SET_DDR(2);
-	SET_DDR(3);
-	SET_DDR(4);
-	SET_DDR(5);
-	SET_DDR(6);
-	SET_DDR(7);
-	SET_DDR(8);
-	SET_DDR(9);
-	SET_DDR(10);
-	SET_DDR(11);
-	SET_DDR(12);
-	SET_DDR(13);
-	SET_DDR(14);
-	SET_DDR(15);
+	// Configure all of the hi and low pins as outputs
+	for (uint8_t i = 0 ; i < array_count(hi_pins) ; i++)
+	{
+		out(chip_pin(hi_pins[i]), 1);
+		ddr(chip_pin(hi_pins[i]), 1);
+	}
 
-	CLR_DDR(0);
-	CLR_DDR(1);
-	CLR_DDR(2);
-	CLR_DDR(3);
-	CLR_DDR(4);
-	CLR_DDR(5);
-	CLR_DDR(6);
-	CLR_DDR(7);
+	for (uint8_t i = 0 ; i < array_count(low_pins) ; i++)
+	{
+		out(chip_pin(low_pins[i]), 0);
+		ddr(chip_pin(low_pins[i]), 1);
+	}
+
+	//DDRB |= (1 << 7);
+	//PORTB |= (1 << 7);
 
 	// discard anything that was received prior.  Sometimes the
 	// operating system or other software will send a modem
@@ -300,7 +226,7 @@ int main(void)
 
 	send_str(PSTR("Press enter to dump\r\n"));
 
-#if 0
+#if 1
 
 	uint16_t addr = 0;
 	char line[64];
@@ -349,9 +275,7 @@ int main(void)
 			// wait for input
 			while (!usb_serial_available())
 			{
-				LED_OFF;
 				_delay_ms(50);
-				LED_ON;
 				_delay_ms(50);
 			}
 

@@ -5,6 +5,7 @@
  * in(0xA3) == PINA & (1 << 3)
  */
 #include <avr/io.h>
+#include <avr/pgmspace.h>
 #include "bits.h"
 
 #define set_bit(PORT, PIN, VALUE) do { \
@@ -81,6 +82,8 @@ out(
 		set_bit(PORTF, pin, value);
 		return;
 	}
+
+	send_str(PSTR("bad\r\n"));
 }
 
 
