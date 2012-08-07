@@ -5,6 +5,9 @@
 
 #define sbi(PORT, PIN) ((PORT) |=  (1 << (PIN)))
 #define cbi(PORT, PIN) ((PORT) &= ~(1 << (PIN)))
+#define array_count(ARRAY) (sizeof(ARRAY) / sizeof(*(ARRAY)))
+#define _STR(X) #X
+#define STR(X) _STR(X)
 
 
 extern void

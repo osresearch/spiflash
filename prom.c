@@ -48,6 +48,7 @@ printable(
 }
 	
 
+/** Mapping of AVR IO ports to the ZIF socket pins */
 static const uint8_t ports[] = {
 	[ 1]	= 0xB6,
 	[ 2]	= 0xB5,
@@ -93,48 +94,70 @@ static const uint8_t ports[] = {
 };
 
 
+typedef struct
+{
+	uint8_t pins;
+	uint8_t addr_width;
+	uint8_t data_width;
+	uint8_t addr_pins[24];
+	uint8_t data_pins[24];
+	uint8_t hi_pins[8];
+	uint8_t lo_pins[8];
+} prom_t;
+
 /** M27C512
  * 28 total pins
  * 16 pins of address,
  * 8 pins of data,
  * some hi, some low
  */
-static const uint8_t chip_pins = 28;
+static const prom_t prom_m27c512 = {
+	.pins		= 28,
 
-static const uint8_t addr_pins[] = 
-{
-	10, 9, 8, 7, 6, 5, 4, 3, 25, 24, 21, 23, 2, 26, 27, 1
-};
+	.addr_width	= 16,
+	.addr_pins	= {
+		10, 9, 8, 7, 6, 5, 4, 3, 25, 24, 21, 23, 2, 26, 27, 1,
+	},
 
-static const uint8_t data_pins[] =
-{
-	11, 12, 13, 15, 16, 17, 18, 19,
-};
+	.data_width	= 8,
+	.data_pins	= {
+		11, 12, 13, 15, 16, 17, 18, 19,
+	},
 
-static const uint8_t hi_pins[] =
-{
-	28,
-};
-
-static const uint8_t low_pins[] =
-{
-	22, 20, 14,
+	.hi_pins	= { 28, },
+	.lo_pins	= { 22, 20, 14, },
 };
 
 
+static const prom_t prom_m27c256 = {
+	.pins		= 28,
+	.addr_width	= 15,
+	.addr_pins	= {
+		10, 9, 8, 7, 6, 5, 4, 3, 25, 24, 21, 23, 2, 26, 27,
+	},
 
-/** Manipulate pins, based on the total number of pins */
-#define array_count(X) (sizeof(X) / sizeof(*X))
+	.data_width	= 8,
+	.data_pins	= {
+		11, 12, 13, 15, 16, 17, 18, 19,
+	},
+	.hi_pins	= { 28, 1 },
+	.lo_pins	= { 22, 20, 14, },
+};
+
+
+/** Select one of the chips */
+#define prom prom_m27c256
+
 
 static inline uint8_t
 chip_pin(
 	const uint8_t pin
 )
 {
-	if (pin <= chip_pins / 2)
+	if (pin <= prom.pins / 2)
 		return ports[pin];
 	else
-		return ports[pin + 40 - chip_pins];
+		return ports[pin + 40 - prom.pins];
 }
 		
 
@@ -143,9 +166,9 @@ set_address(
 	uint16_t addr
 )
 {
-	for (uint8_t i = 0 ; i < array_count(addr_pins) ; i++)
+	for (uint8_t i = 0 ; i < prom.addr_width ; i++)
 	{
-		out(chip_pin(addr_pins[i]), addr & 1);
+		out(chip_pin(prom.addr_pins[i]), addr & 1);
 		addr >>= 1;
 	}
 }
@@ -166,9 +189,9 @@ read_byte(
 	}
 
 	uint8_t b = 0;
-	for (uint8_t i = 0 ; i < 8 ; i++)
+	for (uint8_t i = 0 ; i < prom.data_width  ; i++)
 	{
-		uint8_t bit = in(chip_pin(data_pins[i])) ? 0x80 : 0;
+		uint8_t bit = in(chip_pin(prom.data_pins[i])) ? 0x80 : 0;
 		b = (b >> 1) | bit;
 	}
 
@@ -196,24 +219,30 @@ int main(void)
 		continue;
 
 	// Configure all of the address pins as outputs
-	for (uint8_t i = 0 ; i < array_count(addr_pins) ; i++)
-		ddr(chip_pin(addr_pins[i]), 1);
+	for (uint8_t i = 0 ; i < prom.addr_width ; i++)
+		ddr(chip_pin(prom.addr_pins[i]), 1);
 
 	// Configure all of the data pins as inputs
-	for (uint8_t i = 0 ; i < array_count(data_pins) ; i++)
-		ddr(chip_pin(data_pins[i]), 0);
+	for (uint8_t i = 0 ; i < prom.data_width ; i++)
+		ddr(chip_pin(prom.data_pins[i]), 0);
 
 	// Configure all of the hi and low pins as outputs
-	for (uint8_t i = 0 ; i < array_count(hi_pins) ; i++)
+	for (uint8_t i = 0 ; i < array_count(prom.hi_pins) ; i++)
 	{
-		out(chip_pin(hi_pins[i]), 1);
-		ddr(chip_pin(hi_pins[i]), 1);
+		uint8_t pin = chip_pin(prom.hi_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 1);
+		ddr(pin, 1);
 	}
 
-	for (uint8_t i = 0 ; i < array_count(low_pins) ; i++)
+	for (uint8_t i = 0 ; i < array_count(prom.lo_pins) ; i++)
 	{
-		out(chip_pin(low_pins[i]), 0);
-		ddr(chip_pin(low_pins[i]), 1);
+		uint8_t pin = chip_pin(prom.lo_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 1);
 	}
 
 	//DDRB |= (1 << 7);
@@ -224,13 +253,13 @@ int main(void)
 	// "AT command", which can still be buffered.
 	usb_serial_flush_input();
 
-	send_str(PSTR("Press enter to dump\r\n"));
 
 #if 1
-
 	uint16_t addr = 0;
 	char line[64];
 	uint8_t off = 0;
+
+	send_str(PSTR(STR(prom) ": Looking for strings\r\n"));
 
 	while (1)
 	{
@@ -267,6 +296,7 @@ int main(void)
 		off = 0;
 	}
 #else
+	send_str(PSTR("Press enter to dump\r\n"));
 	uint16_t addr = 0;
 	while (1)
 	{
