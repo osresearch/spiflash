@@ -152,8 +152,9 @@ static const prom_t prom_m27c256 = {
 static const prom_t * prom = &prom_m27c256;
 
 
+/** Translate PROM pin numbers into ZIF pin numbers */
 static inline uint8_t
-chip_pin(
+prom_pin(
 	const uint8_t pin
 )
 {
@@ -164,42 +165,95 @@ chip_pin(
 }
 		
 
+/** Select a 32-bit address for the current PROM */
 static void
-set_address(
-	uint16_t addr
+prom_set_address(
+	uint32_t addr
 )
 {
 	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
 	{
-		out(chip_pin(prom->addr_pins[i]), addr & 1);
+		out(prom_pin(prom->addr_pins[i]), addr & 1);
 		addr >>= 1;
 	}
 }
 
 
+/** Read a byte from the PROM at the specified address..
+ * \todo Update this to handle wider than 8-bit PROM chips.
+ */
 static uint8_t
-read_byte(
-	uint16_t addr
+prom_read(
+	uint32_t addr
 )
 {
-	set_address(addr);
+	prom_set_address(addr);
+
 	for(uint8_t i = 0 ; i < 255; i++)
 	{
-		asm("nop");
-		asm("nop");
-		asm("nop");
 		asm("nop");
 	}
 
 	uint8_t b = 0;
 	for (uint8_t i = 0 ; i < prom->data_width  ; i++)
 	{
-		uint8_t bit = in(chip_pin(prom->data_pins[i])) ? 0x80 : 0;
+		uint8_t bit = in(prom_pin(prom->data_pins[i])) ? 0x80 : 0;
 		b = (b >> 1) | bit;
 	}
 
 	return b;
 }
+
+
+/** Configure all of the IO pins for the new PROM type */
+static void
+prom_setup(void)
+{
+	// Configure all of the address pins as outputs
+	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
+		ddr(prom_pin(prom->addr_pins[i]), 1);
+
+	// Configure all of the data pins as inputs
+	for (uint8_t i = 0 ; i < prom->data_width ; i++)
+		ddr(prom_pin(prom->data_pins[i]), 0);
+
+	// Configure all of the hi and low pins as outputs
+	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->hi_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 1);
+		ddr(pin, 1);
+	}
+
+	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->lo_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 1);
+	}
+
+	// Let things stabilize for a little while
+	_delay_ms(250);
+}
+
+
+/** Switch all of the ZIF pins back to tri-state to make it safe.
+ * Doesn't matter what PROM is inserted.
+ */
+static void
+prom_tristate(void)
+{
+	for (uint8_t i = 1 ; i <= 40 ; i++)
+	{
+		ddr(ports[i], 0);
+		out(ports[i], 0);
+	}
+}
+
 
 
 static uint8_t
@@ -298,12 +352,15 @@ xmodem_send(void)
 			return;
 	}
 
+	// Bring the pins up to level
+	prom_setup();
+
 	// Start sending!
 	while (1)
 	{
 		block.block_num++;
 		for (uint8_t off = 0 ; off < sizeof(block.data) ; off++)
-			block.data[off] = read_byte(addr++);
+			block.data[off] = prom_read(addr++);
 
 		if (xmodem_send_block(&block) < 0)
 			return;
@@ -331,6 +388,7 @@ xmodem_send(void)
 }
 
 
+
 int main(void)
 {
 	// set for 16 MHz clock
@@ -350,35 +408,6 @@ int main(void)
 	while (!(usb_serial_get_control() & USB_SERIAL_DTR))
 		continue;
 
-	// Configure all of the address pins as outputs
-	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
-		ddr(chip_pin(prom->addr_pins[i]), 1);
-
-	// Configure all of the data pins as inputs
-	for (uint8_t i = 0 ; i < prom->data_width ; i++)
-		ddr(chip_pin(prom->data_pins[i]), 0);
-
-	// Configure all of the hi and low pins as outputs
-	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
-	{
-		uint8_t pin = chip_pin(prom->hi_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 1);
-		ddr(pin, 1);
-	}
-
-	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
-	{
-		uint8_t pin = chip_pin(prom->lo_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 0);
-		ddr(pin, 1);
-	}
-
-	//DDRB |= (1 << 7);
-	//PORTB |= (1 << 7);
 
 	// discard anything that was received prior.  Sometimes the
 	// operating system or other software will send a modem
@@ -432,20 +461,9 @@ int main(void)
 	{
 		send_str(PSTR("Start your xmodem receive\r\n"));
 
-/*
-		// wait for input
-		while (!usb_serial_available())
-		{
-			_delay_ms(50);
-		}
-
-		// clean out the buffer
-		while (usb_serial_available())
-			usb_serial_getchar();
-*/
-	
 		// And now send it
 		xmodem_send();
+		prom_tristate();
 	}
 #endif
 }
