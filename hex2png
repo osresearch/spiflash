@@ -1,32 +1,54 @@
 #!/usr/bin/perl
-# Convert a ROM dump into a monochrome PNG
-# Either LSB or MSB first
+# Convert a ROM dump into a monochrome PBM
 use warnings;
 use strict;
+use Getopt::Long;
+
+my $usage = <<__END_OF_USAGE__;
+Usage:
+    $0 [options] < file.bin | convert - file.png
+
+Options:
+    -w | --width 16          Column width (in bits) to stride
+    -b | --offset N          Offset (in bits) into the stride
+    -y | --height N          Height of the image (in scan lines)
+    -m | --msb               Use most significant bit first (default LSB)
+    -s | --size N            Limit size to the first N bytes
+    -n | --negative          Invert the colors
+
+__END_OF_USAGE__
+
+my $max_size;
+my $use_msb;
+my $cols = 8;
+my $bit_offset = 0;
+my $px_height = 512;
+my $use_negative;
+
+GetOptions(
+	"w|width=i"		=> \$cols,
+	"b|offset=i"		=> \$bit_offset,
+	"m|msb+"		=> \$use_msb,
+	"s|size=i"		=> \$max_size,
+	"n|negative+"		=> \$use_negative,
+	"y|height=i"		=> \$px_height,
+) or die $usage;
+
 
 undef $/;
 my $buf = <>;
 
-# Stride across the ROM image, in bits
-my $cols = 16;
-
-# Maximum height of the strip, in bits
-my $px_height = 512;
-
-# Ascending order in each byte == "B"
-# Descending order == "b"
-my $bitstring_fmt = "B*";
-
-my @bits = split //, unpack($bitstring_fmt, $buf);
-my $size = @bits;
+$max_size ||= length $buf;
+$max_size *= 8;
+my @bits = split //, unpack($use_msb ? "b*" : "B*", $buf), $max_size;
 
 # The width of the image will be a function of the number of columns
 # and the maximum height.  This must be rounded to be an even multiple
 # of the column size
-my $px_width = int(($size + $px_height - 1) / $px_height);
+my $px_width = int(($max_size + $px_height - 1) / $px_height);
 $px_width = int(($px_width + $cols - 1) / $cols) * $cols;
 
-warn "$size bits = $px_width x $px_height\n";
+warn "$max_size bits = $px_width x $px_height\n";
 
 # Now generate a PBM file with those dimensions
 print <<"";
@@ -41,9 +63,11 @@ for (my $y = 0 ; $y < $px_height ; $y++)
 	{
 		my $col = $x % $cols;
 		my $group = int($x / $cols);
-		my $offset = $col + $y * $cols + $group * $cols * $px_height;
+		my $offset = $col + $y * $cols + $group * $cols * $px_height + $bit_offset;
+		my $bit = $offset < $max_size ? $bits[$offset] : '0';
+		$bit = !$bit if $use_negative;
 
-		push @row, $offset < $size ? $bits[$offset] : '0';
+		push @row, $bit;
 	}
 
 	print join(' ', @row), "\n";
