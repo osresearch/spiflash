@@ -1,6 +1,56 @@
-#!/usr/bin/python
-import sys
-import Image
+#!/usr/bin/perl
+# Convert a ROM dump into a monochrome PNG
+# Either LSB or MSB first
+use warnings;
+use strict;
+
+undef $/;
+my $buf = <>;
+
+# Stride across the ROM image, in bits
+my $cols = 16;
+
+# Maximum height of the strip, in bits
+my $px_height = 512;
+
+# Ascending order in each byte == "B"
+# Descending order == "b"
+my $bitstring_fmt = "B*";
+
+my @bits = split //, unpack($bitstring_fmt, $buf);
+my $size = @bits;
+
+# The width of the image will be a function of the number of columns
+# and the maximum height.  This must be rounded to be an even multiple
+# of the column size
+my $px_width = int(($size + $px_height - 1) / $px_height);
+$px_width = int(($px_width + $cols - 1) / $cols) * $cols;
+
+warn "$size bits = $px_width x $px_height\n";
+
+# Now generate a PBM file with those dimensions
+print <<"";
+P1
+$px_width $px_height
+
+for (my $y = 0 ; $y < $px_height ; $y++)
+{
+	my @row;
+
+	for (my $x = 0 ; $x < $px_width ; $x++)
+	{
+		my $col = $x % $cols;
+		my $group = int($x / $cols);
+		my $offset = $col + $y * $cols + $group * $cols * $px_height;
+
+		push @row, $offset < $size ? $bits[$offset] : '0';
+	}
+
+	print join(' ', @row), "\n";
+}
+
+
+__END__
 
 buf = sys.stdin.read()
 
