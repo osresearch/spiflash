@@ -1,0 +1,17 @@
+syntax: glob
+*.bin
+*.o.d
+.*.swp
+*.lst
+*.o
+*.elf
+*.hex
+*.bin
+*.lst
+*.lss
+*.map
+*.sym
+*.bin
+*.eep
+*.bin.[0-9]
+*.png
