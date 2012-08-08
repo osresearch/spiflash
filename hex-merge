@@ -1,0 +1,28 @@
+#!/usr/bin/perl
+# Merge a low and high roms into a single image file
+use warnings;
+use strict;
+
+my $f1 = shift;
+my $f2 = shift;
+
+undef $/;
+open BIN1, "<$f1" or die;
+my $bin1 = <BIN1>;
+open BIN2, "<$f2" or die;
+my $bin2 = <BIN2>;
+
+my @b1 = split //, $bin1;
+my @b2 = split //, $bin2;
+
+my $b1_len = length $bin1;
+my $b2_len = length $bin2;
+die "File lengths $b1_len != $b2_len\n"
+	unless $b1_len == $b2_len;
+
+for my $i (0..$b1_len-1)
+{
+	print $b2[$i], $b1[$i];
+}
+
+__END__

@@ -148,8 +148,44 @@ static const prom_t prom_m27c256 = {
 };
 
 
+/** 8192x8 UV EEPROM, found in DX synth */
+static const prom_t prom_mbm2764= {
+	.name		= "MBM2764-30",
+	.pins		= 28,
+	.addr_width	= 13,
+	.addr_pins	= {
+		10, 9, 8, 7, 6, 5, 4, 3, 25, 24, 21, 23, 2,
+	},
+
+	.data_width	= 8,
+	.data_pins	= {
+		11, 12, 13, 15, 16, 17, 18, 19,
+	},
+	.hi_pins	= { 28, 27, 1 }, // vdd, pgm, vpp
+	.lo_pins	= { 22, 20, 14, }, // !oe, !cs, gnd
+};
+
+/** Apple Mac SE PROM chips
+ * Similar to a M27C512, but with the 17th address line on 22 instead of Vpp
+ */
+static const prom_t prom_apple = {
+	.name		= "APPLE PROM",
+	.pins		= 28,
+	.addr_width	= 17,
+	.addr_pins	= {
+		10, 9, 8, 7, 6, 5, 4, 3, 25, 24, 21, 23, 2, 26, 27, 1, 22
+	},
+
+	.data_width	= 8,
+	.data_pins	= {
+		11, 12, 13, 15, 16, 17, 18, 19,
+	},
+	.hi_pins	= { 28, },
+	.lo_pins	= { 20, 14, },
+};
+
 /** Select one of the chips */
-static const prom_t * prom = &prom_m27c256;
+static const prom_t * prom = &prom_apple;
 
 
 /** Translate PROM pin numbers into ZIF pin numbers */
@@ -179,6 +215,20 @@ prom_set_address(
 }
 
 
+static uint8_t
+_prom_read(void)
+{
+	uint8_t b = 0;
+	for (uint8_t i = 0 ; i < prom->data_width  ; i++)
+	{
+		uint8_t bit = in(prom_pin(prom->data_pins[i])) ? 0x80 : 0;
+		b = (b >> 1) | bit;
+	}
+
+	return b;
+}
+
+
 /** Read a byte from the PROM at the specified address..
  * \todo Update this to handle wider than 8-bit PROM chips.
  */
@@ -188,20 +238,27 @@ prom_read(
 )
 {
 	prom_set_address(addr);
-
 	for(uint8_t i = 0 ; i < 255; i++)
 	{
 		asm("nop");
+		asm("nop");
+		asm("nop");
+		asm("nop");
 	}
 
-	uint8_t b = 0;
-	for (uint8_t i = 0 ; i < prom->data_width  ; i++)
+	uint8_t old_r = _prom_read();
+
+	// Try reading a few times to be sure,
+	// or until the values converge
+	for (uint8_t i = 0 ; i < 8 ; i++)
 	{
-		uint8_t bit = in(prom_pin(prom->data_pins[i])) ? 0x80 : 0;
-		b = (b >> 1) | bit;
+		uint8_t r = _prom_read();
+		if (r == old_r)
+			break;
+		old_r = r;
 	}
 
-	return b;
+	return old_r;
 }
 
 
@@ -336,7 +393,7 @@ static void
 xmodem_send(void)
 {
 	uint8_t c;
-	uint16_t addr = 0;
+	uint32_t addr = 0;
 	static xmodem_block_t block;
 
 	block.soh = 0x01;
@@ -352,6 +409,9 @@ xmodem_send(void)
 			return;
 	}
 
+	// Ending address
+	const uint32_t end_addr = ((uint32_t) 1) << prom->addr_width;
+
 	// Bring the pins up to level
 	prom_setup();
 
@@ -366,7 +426,7 @@ xmodem_send(void)
 			return;
 
 		// If we have wrapped the address, we are done
-		if (addr == 0)
+		if (addr > end_addr)
 			break;
 	}
 
