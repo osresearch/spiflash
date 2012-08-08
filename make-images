@@ -1,7 +1,7 @@
 #!/bin/sh
 
 file=$1
-for width in 008 016 032 064 128 256; do
+for width in 008 016 032 064 128 256 384 512 1024; do
 	for order in '' '-m'; do
 		../hex2png \
 			-w $width \
