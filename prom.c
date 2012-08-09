@@ -106,13 +106,25 @@ typedef struct
 	uint8_t lo_pins[8];
 } prom_t;
 
-/** M27C512
- * 28 total pins
- * 16 pins of address,
- * 8 pins of data,
- * some hi, some low
- */
-static const prom_t prom_m27c512 = {
+
+static const prom_t proms[] = {
+{
+	// Default is to leave everything in tristate mode
+	.name		= "NONE",
+	.pins		= 28,
+
+	.addr_width	= 0,
+	.addr_pins	= {
+	},
+
+	.data_width	= 0,
+	.data_pins	= {
+	},
+
+	.hi_pins	= { },
+	.lo_pins	= { },
+},
+{
 	.name		= "M27C512",
 	.pins		= 28,
 
@@ -128,10 +140,8 @@ static const prom_t prom_m27c512 = {
 
 	.hi_pins	= { 28, },
 	.lo_pins	= { 22, 20, 14, },
-};
-
-
-static const prom_t prom_m27c256 = {
+},
+{
 	.name		= "M27C256",
 	.pins		= 28,
 	.addr_width	= 15,
@@ -145,11 +155,9 @@ static const prom_t prom_m27c256 = {
 	},
 	.hi_pins	= { 28, 1 },
 	.lo_pins	= { 22, 20, 14, },
-};
-
-
-/** 8192x8 UV EEPROM, found in DX synth */
-static const prom_t prom_mbm2764= {
+},
+{
+	/** 8192x8 UV EEPROM, found in DX synth */
 	.name		= "MBM2764-30",
 	.pins		= 28,
 	.addr_width	= 13,
@@ -167,12 +175,12 @@ static const prom_t prom_mbm2764= {
 		1,  // vpp
 	},
 	.lo_pins	= { 22, 20, 14, }, // !oe, !cs, gnd
-};
-
-/** Apple Mac SE PROM chips
- * Similar to a M27C512, but with the 17th address line on 22 instead of Vpp
- */
-static const prom_t prom_apple = {
+},
+{
+	/** Apple Mac SE PROM chips
+	 * Similar to a M27C512, but with the 17th address line
+	 * on 22 instead of Vpp, allowing 128 KB of data.
+	 */
 	.name		= "APPLE PROM",
 	.pins		= 28,
 	.addr_width	= 17,
@@ -186,10 +194,11 @@ static const prom_t prom_apple = {
 	},
 	.hi_pins	= { 28, },
 	.lo_pins	= { 20, 14, },
+},
 };
 
 /** Select one of the chips */
-static const prom_t * prom = &prom_mbm2764;
+static const prom_t * prom = &proms[0];
 
 
 /** Translate PROM pin numbers into ZIF pin numbers */
@@ -332,6 +341,183 @@ usb_serial_getchar_block(void)
 }
 
 
+static uint8_t
+usb_serial_getchar_echo(void)
+{
+	while (1)
+	{
+		while (usb_serial_available() == 0)
+			continue;
+
+		uint16_t c = usb_serial_getchar();
+		if (c == -1)
+			continue;
+		usb_serial_putchar(c);
+		return c;
+	}
+}
+
+static uint8_t
+hexdigit_parse(
+	uint8_t c
+)
+{
+	if ('0' <= c && c <= '9')
+		return c - '0';
+	if ('A' <= c && c <= 'F')
+		return c - 'A' + 0xA;
+	if ('a' <= c && c <= 'f')
+		return c - 'a' + 0xA;
+	return 0xFF;
+}
+
+static void
+hex32(
+	uint8_t * buf,
+	uint32_t addr
+)
+{
+	buf[7] = hexdigit(addr & 0xF); addr >>= 4;
+	buf[6] = hexdigit(addr & 0xF); addr >>= 4;
+	buf[5] = hexdigit(addr & 0xF); addr >>= 4;
+	buf[4] = hexdigit(addr & 0xF); addr >>= 4;
+	buf[3] = hexdigit(addr & 0xF); addr >>= 4;
+	buf[2] = hexdigit(addr & 0xF); addr >>= 4;
+	buf[1] = hexdigit(addr & 0xF); addr >>= 4;
+	buf[0] = hexdigit(addr & 0xF); addr >>= 4;
+}
+
+
+static void
+hexdump(
+	uint32_t addr
+)
+{
+	uint8_t buf[80];
+	hex32(buf, addr);
+
+	for (int i = 0 ; i < 16 ; i++)
+	{
+		uint8_t w = prom_read(addr++);
+		uint8_t x = 8 + i * 3;
+		buf[x+0] = ' ';
+		buf[x+1] = hexdigit(w >> 4);
+		buf[x+2] = hexdigit(w >> 0);
+
+		buf[8 + 16*3 + i + 2] = printable(w) ? w : '.';
+	}
+
+	buf[8 + 16 * 3] = ' ';
+	buf[8 + 16 * 3 + 18] = '\r';
+	buf[8 + 16 * 3 + 19] = '\n';
+
+	usb_serial_write(buf, 8 + 16 * 3 + 20);
+}
+
+
+/** Read an address from the serial port, then read that from the PROM */
+static void
+read_addr(void)
+{
+	uint32_t addr = 0;
+	while (1)
+	{
+		uint8_t c = usb_serial_getchar_echo();
+		if (c == '\r')
+			break;
+		if (c == '\n')
+			continue;
+		uint8_t n = hexdigit_parse(c);
+		if (n == 0xFF)
+			goto error;
+
+		addr = (addr << 4) | n;
+	}
+
+	send_str(PSTR("\r\n"));
+
+	prom_setup();
+	_delay_ms(100);
+
+	for (uint8_t line = 0 ; line < 4 ; line++)
+	{
+		hexdump(addr);
+		addr += 16;
+	}
+	return;
+
+error:
+	send_str(PSTR("?\r\n"));
+}
+
+
+/** Send a single prom name to the serial port */
+static void
+prom_list_send(
+	int mode,
+	const prom_t * const prom,
+	int selected
+)
+{
+	uint8_t buf[32];
+
+	uint8_t off = 0;
+	if (selected)
+	{
+		buf[off++] = '*';
+		buf[off++] = '*';
+		buf[off++] = '*';
+		buf[off++] = ' ';
+	}
+
+	buf[off++] = hexdigit(mode);
+	buf[off++] = ' ';
+	memcpy(buf+off, prom->name, sizeof(prom->name));
+	off += sizeof(prom->name);
+	buf[off++] = '\r';
+	buf[off++] = '\n';
+
+	usb_serial_write(buf, off);
+}
+
+
+/** List all of the PROM models supported */
+static void
+prom_list(void)
+{
+	send_str(PSTR("\r\n"));
+	for (int i = 0 ; i < array_count(proms) ; i++)
+	{
+		const prom_t * const p = &proms[i];
+		prom_list_send(i, p, p == prom );
+	}
+}
+
+
+static void
+prom_mode(void)
+{
+	uint8_t c = usb_serial_getchar_echo();
+	send_str(PSTR("\r\n"));
+	if (c < '0' || '9' < c)
+	{
+		send_str(PSTR("?\r\n"));
+		return;
+	}
+
+	uint8_t mode = c - '0';
+	if (mode >= array_count(proms))
+	{
+		send_str(PSTR("?\r\n"));
+		return;
+	}
+
+	prom = &proms[mode];
+
+	prom_list_send(mode, prom, 1);
+}
+
+
 typedef struct
 {
 	uint8_t soh;
@@ -347,7 +533,7 @@ xmodem_block_t;
 #define XMODEM_ACK 0x06
 #define XMODEM_CAN 0x18
 #define XMODEM_C 0x43
-#define XMODEM_NACK 0x15
+#define XMODEM_NAK 0x15
 #define XMODEM_EOF 0x1a
 
 
@@ -380,7 +566,7 @@ xmodem_send_block(
 			return 0;
 		if (c == XMODEM_CAN)
 			return -1;
-		if (c != XMODEM_NACK)
+		if (c != XMODEM_NAK)
 			continue;
 
 		send_block:
@@ -406,7 +592,7 @@ xmodem_send(void)
 	while (1)
 	{
 		c = usb_serial_getchar_block();
-		if (c == XMODEM_NACK)
+		if (c == XMODEM_NAK)
 			break;
 		if (c == XMODEM_CAN)
 			return;
@@ -528,11 +714,28 @@ int main(void)
 #else
 	while (1)
 	{
-		send_str(PSTR("Start your xmodem receive\r\n"));
-
-		// And now send it
-		xmodem_send();
+		// always put the PROM into tristate so that it is safe
+		// to swap the chips in between readings, and 
 		prom_tristate();
+
+		send_str(PSTR("> "));
+		char c = usb_serial_getchar_echo();
+		switch (c)
+		{
+		case XMODEM_NAK: xmodem_send(); break;
+		case 'r': read_addr(); break;
+		case 'l': prom_list(); break;
+		case 'm': prom_mode(); break;
+		case '\n': break;
+		case '\r': break;
+		default:
+			send_str(PSTR("\r\n"
+"r000000 Read a hex word from address\r\n"
+"l       List chip modes\r\n"
+"mN      Select chip N\r\n"
+			));
+			break;
+		}
 	}
 #endif
 }
