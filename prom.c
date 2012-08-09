@@ -161,7 +161,11 @@ static const prom_t prom_mbm2764= {
 	.data_pins	= {
 		11, 12, 13, 15, 16, 17, 18, 19,
 	},
-	.hi_pins	= { 28, 27, 1 }, // vdd, pgm, vpp
+	.hi_pins	= {
+		28, // vdd, disable if external power is used
+		27, // pgm
+		1,  // vpp
+	},
 	.lo_pins	= { 22, 20, 14, }, // !oe, !cs, gnd
 };
 
@@ -185,7 +189,7 @@ static const prom_t prom_apple = {
 };
 
 /** Select one of the chips */
-static const prom_t * prom = &prom_apple;
+static const prom_t * prom = &prom_mbm2764;
 
 
 /** Translate PROM pin numbers into ZIF pin numbers */
@@ -344,7 +348,7 @@ xmodem_block_t;
 #define XMODEM_CAN 0x18
 #define XMODEM_C 0x43
 #define XMODEM_NACK 0x15
-#define XMODEM_EOF 0x18
+#define XMODEM_EOF 0x1a
 
 
 /** Send a block.
@@ -393,7 +397,6 @@ static void
 xmodem_send(void)
 {
 	uint8_t c;
-	uint32_t addr = 0;
 	static xmodem_block_t block;
 
 	block.soh = 0x01;
@@ -410,12 +413,13 @@ xmodem_send(void)
 	}
 
 	// Ending address
-	const uint32_t end_addr = ((uint32_t) 1) << prom->addr_width;
+	const uint32_t end_addr = (((uint32_t) 1) << prom->addr_width) - 1;
 
 	// Bring the pins up to level
 	prom_setup();
 
 	// Start sending!
+	uint32_t addr = 0;
 	while (1)
 	{
 		block.block_num++;
@@ -426,24 +430,26 @@ xmodem_send(void)
 			return;
 
 		// If we have wrapped the address, we are done
-		if (addr > end_addr)
+		if (addr >= end_addr)
 			break;
 	}
 
+#if 0
+/* Don't send EOF?  rx adds it to the file? */
 	block.block_num++;
 	memset(block.data, XMODEM_EOF, sizeof(block.data));
 	if (xmodem_send_block(&block) < 0)
 		return;
+#endif
 
 	// File transmission complete.  send an EOT
 	while (1)
 	{
+		usb_serial_putchar(XMODEM_EOT);
 		c = usb_serial_getchar_block();
 		if (c == XMODEM_ACK
 		||  c == XMODEM_CAN)
 			break;
-
-		usb_serial_putchar(XMODEM_EOT);
 	}
 }
 
@@ -454,6 +460,9 @@ int main(void)
 	// set for 16 MHz clock
 #define CPU_PRESCALE(n) (CLKPR = 0x80, CLKPR = (n))
 	CPU_PRESCALE(0);
+
+	// Disable the ADC
+	ADMUX = 0;
 
 	// initialize the USB, and then wait for the host
 	// to set configuration.  If the Teensy is powered
