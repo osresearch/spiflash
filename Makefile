@@ -273,7 +273,8 @@ LDFLAGS += $(PRINTF_LIB) $(SCANF_LIB) $(MATH_LIB)
 AVRDUDE_PROGRAMMER = stk500v2
 
 # com1 = serial port. Use lpt1 to connect to parallel port.
-AVRDUDE_PORT = com1    # programmer connected to serial device
+#AVRDUDE_PORT = com1    # programmer connected to serial device
+AVRDUDE_POATH = /dev
 
 AVRDUDE_WRITE_FLASH = -U flash:w:$(TARGET).hex
 #AVRDUDE_WRITE_EEPROM = -U eeprom:w:$(TARGET).eep
@@ -334,7 +335,8 @@ DEBUG_HOST = localhost
 
 # Define programs and commands.
 SHELL = sh
-AVR_PATH = /Applications/Arduino.app/Contents//Resources/Java/hardware/tools/avr
+#AVR_PATH = /Applications/Arduino.app/Contents//Resources/Java/hardware/tools/avr
+AVR_PATH = /usr
 CC = $(AVR_PATH)/bin/avr-gcc
 OBJCOPY = $(AVR_PATH)/bin/avr-objcopy
 OBJDUMP = $(AVR_PATH)/bin/avr-objdump
@@ -447,7 +449,9 @@ gccversion :
 
 # Program the device.  
 program: $(TARGET).hex $(TARGET).eep
-	$(AVRDUDE) $(AVRDUDE_FLAGS) $(AVRDUDE_WRITE_FLASH) $(AVRDUDE_WRITE_EEPROM)
+	teensy_loader_cli -mmcu=$(MCU) -w $(TARGET).hex
+
+#	$(AVRDUDE) $(AVRDUDE_FLAGS) $(AVRDUDE_WRITE_FLASH) $(AVRDUDE_WRITE_EEPROM)
 
 
 # Generate avr-gdb config/init file which does the following:
