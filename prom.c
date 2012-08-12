@@ -196,6 +196,36 @@ static const prom_t proms[] = {
 	.hi_pins	= { 28, },
 	.lo_pins	= { 20, 14, },
 },
+{
+	/** atmega8.
+	 * Not an EEPROM, but a chip to read via ISP.
+	 * data_width / addr_width == 0 to indicate that this is not eeprom
+	 */
+#define ISP_MOSI 0
+#define ISP_MISO 0
+#define ISP_SCK 1
+#define ISP_RESET 2
+#define ISP_XTAL 3
+	.name		= "ATMega8",
+	.pins		= 28,
+	.addr_pins	= {
+		[ISP_MOSI] = 17, // from the reader to the chip
+		[ISP_SCK] = 19, // SCK,
+		[ISP_RESET] = 1, // reset
+		[ISP_XTAL] = 9, // xtal
+	},
+	.data_pins	= {
+		[ISP_MISO] = 18, // from the chip back to the reader
+	},
+	.lo_pins	= {
+		8, // gnd
+		22, // gnd
+	},
+	.hi_pins	= {
+		7, // vcc
+		20, // avcc
+	},
+},
 };
 
 /** Select one of the chips */
@@ -213,7 +243,74 @@ prom_pin(
 	else
 		return ports[pin + 40 - prom->pins];
 }
-		
+
+
+/** Configure all of the IO pins for the new PROM type */
+static void
+prom_setup(void)
+{
+	// Configure all of the address pins as outputs,
+	// pulled low for now
+	for (uint8_t i = 0 ; i < array_count(prom->addr_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->addr_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 1);
+	}
+
+	// Configure all of the data pins as inputs,
+	// no pull ups enabled.
+	for (uint8_t i = 0 ; i < array_count(prom->data_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->data_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 0);
+	}
+
+	// Configure all of the hi and low pins as outputs.
+	// Do the low pins first to bring them to ground potential,
+	// then the high pins.
+	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->lo_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 1);
+	}
+
+	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->hi_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 1);
+		ddr(pin, 1);
+	}
+
+
+	// Let things stabilize for a little while
+	_delay_ms(250);
+}
+
+
+/** Switch all of the ZIF pins back to tri-state to make it safe.
+ * Doesn't matter what PROM is inserted.
+ */
+static void
+prom_tristate(void)
+{
+	for (uint8_t i = 1 ; i <= 40 ; i++)
+	{
+		ddr(ports[i], 0);
+		out(ports[i], 0);
+	}
+}
+
 
 /** Select a 32-bit address for the current PROM */
 static void
@@ -243,6 +340,113 @@ _prom_read(void)
 }
 
 
+/** Generate a 0.5 MHz clock on the XTAL pin to drive the chip
+ * if it does not have a built in oscillator enabled.
+ */
+static void
+isp_clock(
+	uint8_t cycles
+)
+{
+	const uint8_t xtal = prom_pin(prom->addr_pins[ISP_XTAL]);
+	for (uint8_t i = 0 ; i < cycles ; i++)
+	{
+		out(xtal, 1);
+		_delay_us(1);
+		out(xtal, 0);
+		_delay_us(1);
+	}
+}
+
+
+/** Send a byte to an AVR ISP enabled chip and read a result.
+ * Since the AVR ISP is bidirectional, every byte out is also a byte in.
+ * \todo Generate clock on XTAL1.
+ */
+static uint8_t
+isp_write(
+	uint8_t byte
+)
+{
+	const uint8_t mosi = prom_pin(prom->addr_pins[ISP_MOSI]);
+	const uint8_t sck = prom_pin(prom->addr_pins[ISP_SCK]);
+	const uint8_t miso = prom_pin(prom->data_pins[ISP_MISO]);
+	uint8_t rc = 0;
+
+	for (uint8_t i = 0 ; i < 8 ; i++, byte <<= 1)
+	{
+		out(mosi, (byte & 0x80) ? 1 : 0);
+		isp_clock(8);
+
+		out(sck, 1);
+		isp_clock(8);
+
+		rc = (rc << 1) | (in(miso) ? 1 : 0);
+		out(sck, 0);
+		//isp_clock(2);
+
+	}
+
+	return rc;
+}
+
+
+/** Read a byte using the AVRISP, instead of the normal PROM format.
+ * \todo: prom_setup() to enter programming mode
+ * \todo: Clock on XTAL1
+ */
+static uint8_t
+isp_read(
+	uint32_t addr
+)
+{
+	prom_setup();
+
+	// Pulse the RESET pin, while holding SCK low.
+	const uint8_t sck = prom_pin(prom->addr_pins[ISP_SCK]);
+	const uint8_t reset = prom_pin(prom->addr_pins[ISP_RESET]);
+	const uint8_t miso = prom_pin(prom->data_pins[ISP_MISO]);
+	out(sck, 0);
+	out(reset, 1);
+	isp_clock(4);
+	out(reset, 0);
+	isp_clock(255);
+
+	// Now delay at least 20 ms
+	_delay_ms(20);
+
+	uint8_t rc1, rc2, rc3, rc4;
+
+	// Enter programming mode; enable pull up on the MISO pin
+	out(miso, 1);
+
+	rc1 = isp_write(0xAC);
+	rc2 = isp_write(0x53);
+	rc3 = isp_write(0x12);
+	rc4 = isp_write(0x34);
+
+	// Disable pull up
+	out(miso, 0);
+
+	// Now show what we read
+	uint8_t buf[10];
+	buf[0] = hexdigit(rc1 >> 4);
+	buf[1] = hexdigit(rc1 >> 0);
+	buf[2] = hexdigit(rc2 >> 4);
+	buf[3] = hexdigit(rc2 >> 0);
+	buf[4] = hexdigit(rc3 >> 4);
+	buf[5] = hexdigit(rc3 >> 0);
+	buf[6] = hexdigit(rc4 >> 4);
+	buf[7] = hexdigit(rc4 >> 0);
+
+	buf[8] = '\r';
+	buf[9] = '\n';
+
+	usb_serial_write(buf, sizeof(buf));
+	return 0;
+}
+
+
 /** Read a byte from the PROM at the specified address..
  * \todo Update this to handle wider than 8-bit PROM chips.
  */
@@ -251,6 +455,9 @@ prom_read(
 	uint32_t addr
 )
 {
+	if (prom->data_width == 1)
+		return isp_read(addr);
+
 	prom_set_address(addr);
 	for(uint8_t i = 0 ; i < 255; i++)
 	{
@@ -273,72 +480,6 @@ prom_read(
 	}
 
 	return old_r;
-}
-
-
-/** Configure all of the IO pins for the new PROM type */
-static void
-prom_setup(void)
-{
-	// Configure all of the address pins as outputs
-	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
-		ddr(prom_pin(prom->addr_pins[i]), 1);
-
-	// Configure all of the data pins as inputs
-	for (uint8_t i = 0 ; i < prom->data_width ; i++)
-		ddr(prom_pin(prom->data_pins[i]), 0);
-
-	// Configure all of the hi and low pins as outputs
-	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
-	{
-		uint8_t pin = prom_pin(prom->hi_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 1);
-		ddr(pin, 1);
-	}
-
-	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
-	{
-		uint8_t pin = prom_pin(prom->lo_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 0);
-		ddr(pin, 1);
-	}
-
-	// Let things stabilize for a little while
-	_delay_ms(250);
-}
-
-
-/** Switch all of the ZIF pins back to tri-state to make it safe.
- * Doesn't matter what PROM is inserted.
- */
-static void
-prom_tristate(void)
-{
-	for (uint8_t i = 1 ; i <= 40 ; i++)
-	{
-		ddr(ports[i], 0);
-		out(ports[i], 0);
-	}
-}
-
-
-
-static uint8_t
-usb_serial_getchar_block(void)
-{
-	while (1)
-	{
-		while (usb_serial_available() == 0)
-			continue;
-
-		uint16_t c = usb_serial_getchar();
-		if (c != -1)
-			return c;
-	}
 }
 
 
@@ -438,7 +579,6 @@ read_addr(void)
 	send_str(PSTR("\r\n"));
 
 	prom_setup();
-	_delay_ms(100);
 
 	for (uint8_t line = 0 ; line < 4 ; line++)
 	{
@@ -519,15 +659,13 @@ prom_mode(void)
 }
 
 
+static xmodem_block_t xmodem_block;
 
 /** Send the entire PROM memory via xmodem */
 static void
 prom_send(void)
 {
-	uint8_t c;
-	static xmodem_block_t block;
-
-	if (xmodem_init(&block) < 0)
+	if (xmodem_init(&xmodem_block) < 0)
 		return;
 
 	// Ending address
@@ -540,10 +678,10 @@ prom_send(void)
 	uint32_t addr = 0;
 	while (1)
 	{
-		for (uint8_t off = 0 ; off < sizeof(block.data) ; off++)
-			block.data[off] = prom_read(addr++);
+		for (uint8_t off = 0 ; off < sizeof(xmodem_block.data) ; off++)
+			xmodem_block.data[off] = prom_read(addr++);
 
-		if (xmodem_send(&block) < 0)
+		if (xmodem_send(&xmodem_block) < 0)
 			return;
 
 		// If we have wrapped the address, we are done
@@ -551,7 +689,7 @@ prom_send(void)
 			break;
 	}
 
-	xmodem_fini(&block);
+	xmodem_fini(&xmodem_block);
 }
 
 
@@ -642,6 +780,7 @@ int main(void)
 		case 'r': read_addr(); break;
 		case 'l': prom_list(); break;
 		case 'm': prom_mode(); break;
+		case 'i': isp_read(0); break;
 		case '\n': break;
 		case '\r': break;
 		default:
