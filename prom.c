@@ -170,7 +170,7 @@ static const prom_t proms[] = {
 		11, 12, 13, 15, 16, 17, 18, 19,
 	},
 	.hi_pins	= {
-		28, // vdd, disable if external power is used
+		//28, // vdd, disabled since external power must be used
 		27, // pgm
 		1,  // vpp
 	},
