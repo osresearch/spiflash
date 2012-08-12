@@ -47,6 +47,7 @@ TARGET = prom
 # List C source files here. (C dependencies are automatically generated.)
 SRC =	$(TARGET).c \
 	bits.c \
+	xmodem.c \
 	usb_serial.c \
 
 

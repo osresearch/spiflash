@@ -11,6 +11,7 @@
 #include <string.h>
 #include <util/delay.h>
 #include "usb_serial.h"
+#include "xmodem.h"
 #include "bits.h"
 
 void send_str(const char *s);
@@ -518,85 +519,16 @@ prom_mode(void)
 }
 
 
-typedef struct
-{
-	uint8_t soh;
-	uint8_t block_num;
-	uint8_t block_num_complement;
-	uint8_t data[128];
-	uint8_t cksum;
-} __attribute__((__packed__))
-xmodem_block_t;
 
-#define XMODEM_SOH 0x01
-#define XMODEM_EOT 0x04
-#define XMODEM_ACK 0x06
-#define XMODEM_CAN 0x18
-#define XMODEM_C 0x43
-#define XMODEM_NAK 0x15
-#define XMODEM_EOF 0x1a
-
-
-/** Send a block.
- * Compute the checksum and complement.
- *
- * \return 0 if all is ok, -1 if a cancel is requested or more
- * than 10 retries occur.
- */
-static int
-xmodem_send_block(
-	xmodem_block_t * const block
-)
-{
-	// Compute the checksum and complement
-	uint8_t cksum = 0;
-	for (uint8_t i = 0 ; i < sizeof(block->data) ; i++)
-		cksum += block->data[i];
-	block->cksum = cksum;
-	block->block_num_complement = 0xFF - block->block_num;
-
-	// Send the block, and wait for an ACK
-	uint8_t retry_count = 0;
-	goto send_block;
-
-	while (retry_count++ < 10)
-	{
-		uint8_t c = usb_serial_getchar_block();
-		if (c == XMODEM_ACK)
-			return 0;
-		if (c == XMODEM_CAN)
-			return -1;
-		if (c != XMODEM_NAK)
-			continue;
-
-		send_block:
-		usb_serial_write((void*) block, sizeof(*block));
-	}
-
-	// Failure or cancel
-	return -1;
-}
-
-
-/** Send the entire PROM memory */
+/** Send the entire PROM memory via xmodem */
 static void
-xmodem_send(void)
+prom_send(void)
 {
 	uint8_t c;
 	static xmodem_block_t block;
 
-	block.soh = 0x01;
-	block.block_num = 0x00;
-
-	// wait for initial nak
-	while (1)
-	{
-		c = usb_serial_getchar_block();
-		if (c == XMODEM_NAK)
-			break;
-		if (c == XMODEM_CAN)
-			return;
-	}
+	if (xmodem_init(&block) < 0)
+		return;
 
 	// Ending address
 	const uint32_t end_addr = (((uint32_t) 1) << prom->addr_width) - 1;
@@ -608,11 +540,10 @@ xmodem_send(void)
 	uint32_t addr = 0;
 	while (1)
 	{
-		block.block_num++;
 		for (uint8_t off = 0 ; off < sizeof(block.data) ; off++)
 			block.data[off] = prom_read(addr++);
 
-		if (xmodem_send_block(&block) < 0)
+		if (xmodem_send(&block) < 0)
 			return;
 
 		// If we have wrapped the address, we are done
@@ -620,24 +551,9 @@ xmodem_send(void)
 			break;
 	}
 
-#if 0
-/* Don't send EOF?  rx adds it to the file? */
-	block.block_num++;
-	memset(block.data, XMODEM_EOF, sizeof(block.data));
-	if (xmodem_send_block(&block) < 0)
-		return;
-#endif
-
-	// File transmission complete.  send an EOT
-	while (1)
-	{
-		usb_serial_putchar(XMODEM_EOT);
-		c = usb_serial_getchar_block();
-		if (c == XMODEM_ACK
-		||  c == XMODEM_CAN)
-			break;
-	}
+	xmodem_fini(&block);
 }
+
 
 
 
@@ -722,7 +638,7 @@ int main(void)
 		char c = usb_serial_getchar_echo();
 		switch (c)
 		{
-		case XMODEM_NAK: xmodem_send(); break;
+		case XMODEM_NAK: prom_send(); break;
 		case 'r': read_addr(); break;
 		case 'l': prom_list(); break;
 		case 'm': prom_mode(); break;
