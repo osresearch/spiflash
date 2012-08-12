@@ -357,7 +357,7 @@ isp_read(
 	uint32_t addr
 )
 {
-	uint8_t h = (addr >> 13) & 0x01;
+	uint8_t h = (addr >> 12) & 0x01;
 	uint8_t a = (addr >>  8) & 0x0F;
 	uint8_t b = (addr >>  0) & 0xFF;
 	isp_write(0x20 | (h ? 0x8 : 0));
