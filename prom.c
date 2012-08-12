@@ -208,6 +208,7 @@ static const prom_t proms[] = {
 #define ISP_XTAL 3
 	.name		= "ATMega8",
 	.pins		= 28,
+	.addr_width	= 13,
 	.addr_pins	= {
 		[ISP_MOSI] = 17, // from the reader to the chip
 		[ISP_SCK] = 19, // SCK,
@@ -266,7 +267,6 @@ isp_clock(
 
 /** Send a byte to an AVR ISP enabled chip and read a result.
  * Since the AVR ISP is bidirectional, every byte out is also a byte in.
- * \todo Generate clock on XTAL1.
  */
 static uint8_t
 isp_write(
@@ -281,15 +281,13 @@ isp_write(
 	for (uint8_t i = 0 ; i < 8 ; i++, byte <<= 1)
 	{
 		out(mosi, (byte & 0x80) ? 1 : 0);
-		isp_clock(8);
+		isp_clock(4);
 
 		out(sck, 1);
-		isp_clock(8);
+		isp_clock(4);
 
 		rc = (rc << 1) | (in(miso) ? 1 : 0);
 		out(sck, 0);
-		//isp_clock(2);
-
 	}
 
 	return rc;
@@ -571,7 +569,8 @@ hexdump(
 		buf[8 + 16*3 + i + 2] = printable(w) ? w : '.';
 	}
 
-	buf[8 + 16 * 3] = ' ';
+	buf[8 + 16 * 3 + 0] = ' ';
+	buf[8 + 16 * 3 + 1] = ' ';
 	buf[8 + 16 * 3 + 18] = '\r';
 	buf[8 + 16 * 3 + 19] = '\n';
 
