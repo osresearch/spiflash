@@ -24,10 +24,12 @@ my $cols = 8;
 my $bit_offset = 0;
 my $px_height = 512;
 my $use_negative;
+my $offset = 0;
 
 GetOptions(
 	"w|width=i"		=> \$cols,
-	"b|offset=i"		=> \$bit_offset,
+	"b|bit-offset=i"	=> \$bit_offset,
+	"o|offset=i"		=> \$offset,
 	"m|msb+"		=> \$use_msb,
 	"s|size=i"		=> \$max_size,
 	"n|negative+"		=> \$use_negative,
@@ -37,6 +39,9 @@ GetOptions(
 
 undef $/;
 my $buf = <>;
+
+# Skip offset bytes into the image
+$buf = substr $buf, $offset;
 
 $max_size ||= length $buf;
 $max_size *= 8;
