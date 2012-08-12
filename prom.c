@@ -245,101 +245,6 @@ prom_pin(
 }
 
 
-/** Configure all of the IO pins for the new PROM type */
-static void
-prom_setup(void)
-{
-	// Configure all of the address pins as outputs,
-	// pulled low for now
-	for (uint8_t i = 0 ; i < array_count(prom->addr_pins) ; i++)
-	{
-		uint8_t pin = prom_pin(prom->addr_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 0);
-		ddr(pin, 1);
-	}
-
-	// Configure all of the data pins as inputs,
-	// no pull ups enabled.
-	for (uint8_t i = 0 ; i < array_count(prom->data_pins) ; i++)
-	{
-		uint8_t pin = prom_pin(prom->data_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 0);
-		ddr(pin, 0);
-	}
-
-	// Configure all of the hi and low pins as outputs.
-	// Do the low pins first to bring them to ground potential,
-	// then the high pins.
-	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
-	{
-		uint8_t pin = prom_pin(prom->lo_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 0);
-		ddr(pin, 1);
-	}
-
-	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
-	{
-		uint8_t pin = prom_pin(prom->hi_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 1);
-		ddr(pin, 1);
-	}
-
-
-	// Let things stabilize for a little while
-	_delay_ms(250);
-}
-
-
-/** Switch all of the ZIF pins back to tri-state to make it safe.
- * Doesn't matter what PROM is inserted.
- */
-static void
-prom_tristate(void)
-{
-	for (uint8_t i = 1 ; i <= 40 ; i++)
-	{
-		ddr(ports[i], 0);
-		out(ports[i], 0);
-	}
-}
-
-
-/** Select a 32-bit address for the current PROM */
-static void
-prom_set_address(
-	uint32_t addr
-)
-{
-	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
-	{
-		out(prom_pin(prom->addr_pins[i]), addr & 1);
-		addr >>= 1;
-	}
-}
-
-
-static uint8_t
-_prom_read(void)
-{
-	uint8_t b = 0;
-	for (uint8_t i = 0 ; i < prom->data_width  ; i++)
-	{
-		uint8_t bit = in(prom_pin(prom->data_pins[i])) ? 0x80 : 0;
-		b = (b >> 1) | bit;
-	}
-
-	return b;
-}
-
-
 /** Generate a 0.5 MHz clock on the XTAL pin to drive the chip
  * if it does not have a built in oscillator enabled.
  */
@@ -391,17 +296,12 @@ isp_write(
 }
 
 
-/** Read a byte using the AVRISP, instead of the normal PROM format.
- * \todo: prom_setup() to enter programming mode
- * \todo: Clock on XTAL1
+/** Enter programming mode for an ISP chip.
+ * \return 1 on success, 0 on failure.
  */
-static uint8_t
-isp_read(
-	uint32_t addr
-)
+static int
+isp_setup(void)
 {
-	prom_setup();
-
 	// Pulse the RESET pin, while holding SCK low.
 	const uint8_t sck = prom_pin(prom->addr_pins[ISP_SCK]);
 	const uint8_t reset = prom_pin(prom->addr_pins[ISP_RESET]);
@@ -428,6 +328,9 @@ isp_read(
 	// Disable pull up
 	out(miso, 0);
 
+	if (rc3 == 0x53)
+		return 1;
+
 	// Now show what we read
 	uint8_t buf[10];
 	buf[0] = hexdigit(rc1 >> 4);
@@ -447,6 +350,125 @@ isp_read(
 }
 
 
+/** Read a byte using the AVRISP, instead of the normal PROM format.
+ * \todo: prom_setup() to enter programming mode
+ * \todo: Clock on XTAL1
+ */
+static uint8_t
+isp_read(
+	uint32_t addr
+)
+{
+	uint8_t h = (addr >> 13) & 0x01;
+	uint8_t a = (addr >>  8) & 0x0F;
+	uint8_t b = (addr >>  0) & 0xFF;
+	isp_write(0x20 | (h ? 0x8 : 0));
+	isp_write(a);
+	isp_write(b);
+	return isp_write(0);
+}
+
+
+
+/** Configure all of the IO pins for the new PROM type */
+static void
+prom_setup(void)
+{
+	// Configure all of the address pins as outputs,
+	// pulled low for now
+	for (uint8_t i = 0 ; i < array_count(prom->addr_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->addr_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 1);
+	}
+
+	// Configure all of the data pins as inputs,
+	// no pull ups enabled.
+	for (uint8_t i = 0 ; i < array_count(prom->data_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->data_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 0);
+	}
+
+	// Configure all of the hi and low pins as outputs.
+	// Do the low pins first to bring them to ground potential,
+	// then the high pins.
+	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->lo_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 1);
+	}
+
+	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->hi_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 1);
+		ddr(pin, 1);
+	}
+
+
+	// Let things stabilize for a little while
+	_delay_ms(250);
+
+	// If this is an AVR ISP chip, try to go into programming mode
+	if (prom->data_width == 0)
+		isp_setup();
+}
+
+
+/** Switch all of the ZIF pins back to tri-state to make it safe.
+ * Doesn't matter what PROM is inserted.
+ */
+static void
+prom_tristate(void)
+{
+	for (uint8_t i = 1 ; i <= 40 ; i++)
+	{
+		ddr(ports[i], 0);
+		out(ports[i], 0);
+	}
+}
+
+
+/** Select a 32-bit address for the current PROM */
+static void
+prom_set_address(
+	uint32_t addr
+)
+{
+	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
+	{
+		out(prom_pin(prom->addr_pins[i]), addr & 1);
+		addr >>= 1;
+	}
+}
+
+
+static uint8_t
+_prom_read(void)
+{
+	uint8_t b = 0;
+	for (uint8_t i = 0 ; i < prom->data_width  ; i++)
+	{
+		uint8_t bit = in(prom_pin(prom->data_pins[i])) ? 0x80 : 0;
+		b = (b >> 1) | bit;
+	}
+
+	return b;
+}
+
+
 /** Read a byte from the PROM at the specified address..
  * \todo Update this to handle wider than 8-bit PROM chips.
  */
@@ -455,7 +477,7 @@ prom_read(
 	uint32_t addr
 )
 {
-	if (prom->data_width == 1)
+	if (prom->data_width == 0)
 		return isp_read(addr);
 
 	prom_set_address(addr);
