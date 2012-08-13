@@ -239,6 +239,44 @@ static const prom_t proms[] = {
 	.lo_pins	= { 20, 14, },
 },
 {
+	/** 2716 mask ROM used in video games.
+	 * \note: Not tested yet.
+	 */
+	.name		= "2716 (untested)",
+	.pins		= 24,
+	.addr_width	= 11,
+	.addr_pins	= {
+		8, 7, 6, 5, 4, 3, 2, 1, 23, 22, 19,
+	},
+
+	.data_width	= 8,
+	.data_pins	= {
+		9, 10, 11, 13, 14, 15, 16, 17
+	},
+
+	.hi_pins	= { 24, 21, },
+	.lo_pins	= { 12, 20, 18 },
+},
+{
+	/** 9316 mask ROM used in video games.
+	 * \note: Not tested yet.
+	 */
+	.name		= "9316 (untested)",
+	.pins		= 24,
+	.addr_width	= 11,
+	.addr_pins	= {
+		8, 7, 6, 5, 4, 3, 2, 1, 23, 22, 19,
+	},
+
+	.data_width	= 8,
+	.data_pins	= {
+		9, 10, 11, 13, 14, 15, 16, 17
+	},
+
+	.hi_pins	= { 24, 18, },
+	.lo_pins	= { 12, 21, 20 },
+},
+{
 	/** atmega8.
 	 * Not an EEPROM, but a chip to read via ISP.
 	 * data_width / addr_width == 0 to indicate that this is not eeprom
