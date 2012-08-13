@@ -49,8 +49,13 @@ printable(
 }
 	
 
+/** Total number of mapped pins.
+ * This is unlikely to change without a significant hardware redesign.
+ */
+#define ZIF_PINS 40
+
 /** Mapping of AVR IO ports to the ZIF socket pins */
-static const uint8_t ports[] = {
+static const uint8_t ports[ZIF_PINS+1] = {
 	[ 1]	= 0xB6,
 	[ 2]	= 0xB5,
 	[ 3]	= 0xB4,
@@ -242,7 +247,7 @@ prom_pin(
 	if (pin <= prom->pins / 2)
 		return ports[pin];
 	else
-		return ports[pin + 40 - prom->pins];
+		return ports[pin + ZIF_PINS - prom->pins];
 }
 
 
@@ -349,8 +354,6 @@ isp_setup(void)
 
 
 /** Read a byte using the AVRISP, instead of the normal PROM format.
- * \todo: prom_setup() to enter programming mode
- * \todo: Clock on XTAL1
  */
 static uint8_t
 isp_read(
@@ -431,7 +434,7 @@ prom_setup(void)
 static void
 prom_tristate(void)
 {
-	for (uint8_t i = 1 ; i <= 40 ; i++)
+	for (uint8_t i = 1 ; i <= ZIF_PINS ; i++)
 	{
 		ddr(ports[i], 0);
 		out(ports[i], 0);
