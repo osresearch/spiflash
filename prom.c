@@ -102,13 +102,50 @@ static const uint8_t ports[ZIF_PINS+1] = {
 
 typedef struct
 {
+	/** Name of the chip type */
 	char name[16];
+
+	/** Total number of pins on the chip */
 	uint8_t pins;
+
+	/** Total number of address pins.
+	 * The download will retrieve 2^addr_width bytes.
+ 	 */
 	uint8_t addr_width;
+
+	/** Total number of data pins.
+	 * If data_pins == 0, the chip is assumed to be in AVR ISP mode.
+	 */
 	uint8_t data_width;
+
+	/** Address pins.
+	 * An array of up to 24 pins in package numbering.
+	 * Any that are 0 will be ignored.  Other than ISP mode chips,
+	 * there should be addr_width pins defined here.
+	 * These will be configured as outputs from the reader
+	 * and initially driven low.
+	 */
 	uint8_t addr_pins[24];
+
+	/** Data pins.
+	 * An array of up to 24 pins in package numbering.
+	 * Any that are 0 will be ignored.  Other than ISP mode chips,
+	 * there should be data_width pins defined here.
+	 * These will be configured as inputs from the reader,
+	 * with no pull ups.
+	 */
 	uint8_t data_pins[24];
+
+	/** Pins to be driven high at all times.
+	 * These will be configured as outputs and drive hi.
+	 * Typical power limits are sourcing 50 mA per pin.
+	 */
 	uint8_t hi_pins[8];
+
+	/** Pins to be driven low at all times.
+	 * These will be configured as outputs and driven low.
+	 * Typical power limits are sinking 50 mA per pin.
+	 */
 	uint8_t lo_pins[8];
 } prom_t;
 
