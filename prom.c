@@ -277,6 +277,28 @@ static const prom_t proms[] = {
 	.lo_pins	= { 12, 21, 20 },
 },
 {
+	.name		= "28F512 (untstd)",
+	.pins		= 32,
+	.addr_width	= 16,
+	.addr_pins	= {
+		12, 11, 10, 9, 8, 7, 6, 5, 27, 26, 23, 25, 4, 28, 29, 15
+	},
+	.data_width	= 8,
+	.data_pins	= {
+		13, 14, 15, 17, 18, 19, 20, 21,
+	},
+	.hi_pins	= {
+		32, // vcc
+		31, // !we
+		1, // Vpp
+	},
+	.lo_pins	= {
+		16, // gnd
+		24, // !oe
+		22, // !ce
+	},
+},
+{
 	/** atmega8.
 	 * Not an EEPROM, but a chip to read via ISP.
 	 * data_width / addr_width == 0 to indicate that this is not eeprom
