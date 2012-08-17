@@ -157,6 +157,21 @@ static const prom_t proms[] = {
 	.lo_pins	= { 22, 20, 14, },
 },
 {
+	.name		= "M27C64",
+	.pins		= 28,
+	.addr_width	= 13,
+	.addr_pins	= {
+		10, 9, 8, 7, 6, 5, 4, 3, 25, 24, 21, 23, 2,
+	},
+
+	.data_width	= 8,
+	.data_pins	= {
+		11, 12, 13, 15, 16, 17, 18, 19,
+	},
+	.hi_pins	= { 28, 1, 27 },
+	.lo_pins	= { 22, 20, 14, },
+},
+{
 	/** 8192x8 UV EEPROM, found in DX synth */
 	.name		= "MBM2764-30",
 	.pins		= 28,
