@@ -299,6 +299,26 @@ static const prom_t proms[] = {
 	},
 },
 {
+	.name		= "HN462732",
+	.pins		= 24,
+	.addr_width	= 12,
+	.addr_pins	= {
+		8, 7, 6, 5, 4, 3, 2, 1, 23, 22, 19, 21,
+	},
+	.data_width	= 8,
+	.data_pins	= {
+		9, 10, 11, 13, 14, 15, 16, 17,
+	},
+	.hi_pins	= {
+		24, // vcc
+	},
+	.lo_pins	= {
+		12, // gnd
+		20, // !oe
+		18, // !ce
+	},
+},
+{
 	/** atmega8.
 	 * Not an EEPROM, but a chip to read via ISP.
 	 * data_width / addr_width == 0 to indicate that this is not eeprom
