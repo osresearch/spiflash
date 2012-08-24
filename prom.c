@@ -299,6 +299,26 @@ static const prom_t proms[] = {
 	},
 },
 {
+	// C64 kernel and basic ROMs
+	.name		= "2364A",
+	.pins		= 24,
+	.addr_width	= 13,
+	.addr_pins	= {
+		8, 7, 6, 5, 4, 3, 2, 1, 23, 22, 19, 18, 21,
+	},
+	.data_width	= 8,
+	.data_pins	= {
+		9, 10, 11, 13, 14, 15, 16, 17,
+	},
+	.hi_pins	= {
+		24,
+	},
+	.lo_pins	= {
+		12, // gnd
+		20, // !cs
+	},
+},
+{
 	.name		= "HN462732",
 	.pins		= 24,
 	.addr_width	= 12,
