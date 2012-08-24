@@ -8,7 +8,7 @@ sys.stdin.read(skip)
 offset = skip
 
 # Look for the first end of scan line?
-started = 0
+started = 1
 debug = 0
 
 while True:
