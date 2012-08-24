@@ -11,6 +11,7 @@
 #include <string.h>
 #include <util/delay.h>
 #include "usb_serial.h"
+#include "xmodem.h"
 #include "bits.h"
 
 void send_str(const char *s);
@@ -48,8 +49,13 @@ printable(
 }
 	
 
+/** Total number of mapped pins.
+ * This is unlikely to change without a significant hardware redesign.
+ */
+#define ZIF_PINS 40
+
 /** Mapping of AVR IO ports to the ZIF socket pins */
-static const uint8_t ports[] = {
+static const uint8_t ports[ZIF_PINS+1] = {
 	[ 1]	= 0xB6,
 	[ 2]	= 0xB5,
 	[ 3]	= 0xB4,
@@ -96,13 +102,50 @@ static const uint8_t ports[] = {
 
 typedef struct
 {
+	/** Name of the chip type */
 	char name[16];
+
+	/** Total number of pins on the chip */
 	uint8_t pins;
+
+	/** Total number of address pins.
+	 * The download will retrieve 2^addr_width bytes.
+ 	 */
 	uint8_t addr_width;
+
+	/** Total number of data pins.
+	 * If data_pins == 0, the chip is assumed to be in AVR ISP mode.
+	 */
 	uint8_t data_width;
+
+	/** Address pins.
+	 * An array of up to 24 pins in package numbering.
+	 * Any that are 0 will be ignored.  Other than ISP mode chips,
+	 * there should be addr_width pins defined here.
+	 * These will be configured as outputs from the reader
+	 * and initially driven low.
+	 */
 	uint8_t addr_pins[24];
+
+	/** Data pins.
+	 * An array of up to 24 pins in package numbering.
+	 * Any that are 0 will be ignored.  Other than ISP mode chips,
+	 * there should be data_width pins defined here.
+	 * These will be configured as inputs from the reader,
+	 * with no pull ups.
+	 */
 	uint8_t data_pins[24];
+
+	/** Pins to be driven high at all times.
+	 * These will be configured as outputs and drive hi.
+	 * Typical power limits are sourcing 50 mA per pin.
+	 */
 	uint8_t hi_pins[8];
+
+	/** Pins to be driven low at all times.
+	 * These will be configured as outputs and driven low.
+	 * Typical power limits are sinking 50 mA per pin.
+	 */
 	uint8_t lo_pins[8];
 } prom_t;
 
@@ -185,7 +228,7 @@ static const prom_t proms[] = {
 		11, 12, 13, 15, 16, 17, 18, 19,
 	},
 	.hi_pins	= {
-		28, // vdd, disable if external power is used
+		//28, // vdd, disabled since external power must be used
 		27, // pgm
 		1,  // vpp
 	},
@@ -210,6 +253,97 @@ static const prom_t proms[] = {
 	.hi_pins	= { 28, },
 	.lo_pins	= { 20, 14, },
 },
+{
+	/** 2716 mask ROM used in video games.
+	 * \note: Not tested yet.
+	 */
+	.name		= "2716 (untested)",
+	.pins		= 24,
+	.addr_width	= 11,
+	.addr_pins	= {
+		8, 7, 6, 5, 4, 3, 2, 1, 23, 22, 19,
+	},
+
+	.data_width	= 8,
+	.data_pins	= {
+		9, 10, 11, 13, 14, 15, 16, 17
+	},
+
+	.hi_pins	= { 24, 21, },
+	.lo_pins	= { 12, 20, 18 },
+},
+{
+	/** 9316 mask ROM used in video games.
+	 * \note: Not tested yet.
+	 */
+	.name		= "9316 (untested)",
+	.pins		= 24,
+	.addr_width	= 11,
+	.addr_pins	= {
+		8, 7, 6, 5, 4, 3, 2, 1, 23, 22, 19,
+	},
+
+	.data_width	= 8,
+	.data_pins	= {
+		9, 10, 11, 13, 14, 15, 16, 17
+	},
+
+	.hi_pins	= { 24, 18, },
+	.lo_pins	= { 12, 21, 20 },
+},
+{
+	.name		= "28F512 (untstd)",
+	.pins		= 32,
+	.addr_width	= 16,
+	.addr_pins	= {
+		12, 11, 10, 9, 8, 7, 6, 5, 27, 26, 23, 25, 4, 28, 29, 15
+	},
+	.data_width	= 8,
+	.data_pins	= {
+		13, 14, 15, 17, 18, 19, 20, 21,
+	},
+	.hi_pins	= {
+		32, // vcc
+		31, // !we
+		1, // Vpp
+	},
+	.lo_pins	= {
+		16, // gnd
+		24, // !oe
+		22, // !ce
+	},
+},
+{
+	/** atmega8.
+	 * Not an EEPROM, but a chip to read via ISP.
+	 * data_width / addr_width == 0 to indicate that this is not eeprom
+	 */
+#define ISP_MOSI 0
+#define ISP_MISO 0
+#define ISP_SCK 1
+#define ISP_RESET 2
+#define ISP_XTAL 3
+	.name		= "ATMega8",
+	.pins		= 28,
+	.addr_width	= 13,
+	.addr_pins	= {
+		[ISP_MOSI] = 17, // from the reader to the chip
+		[ISP_SCK] = 19, // SCK,
+		[ISP_RESET] = 1, // reset
+		[ISP_XTAL] = 9, // xtal
+	},
+	.data_pins	= {
+		[ISP_MISO] = 18, // from the chip back to the reader
+	},
+	.lo_pins	= {
+		8, // gnd
+		22, // gnd
+	},
+	.hi_pins	= {
+		7, // vcc
+		20, // avcc
+	},
+},
 };
 
 /** Select one of the chips */
@@ -225,9 +359,200 @@ prom_pin(
 	if (pin <= prom->pins / 2)
 		return ports[pin];
 	else
-		return ports[pin + 40 - prom->pins];
+		return ports[pin + ZIF_PINS - prom->pins];
 }
-		
+
+
+/** Generate a 0.5 MHz clock on the XTAL pin to drive the chip
+ * if it does not have a built in oscillator enabled.
+ */
+static void
+isp_clock(
+	uint8_t cycles
+)
+{
+	const uint8_t xtal = prom_pin(prom->addr_pins[ISP_XTAL]);
+	for (uint8_t i = 0 ; i < cycles ; i++)
+	{
+		out(xtal, 1);
+		_delay_us(1);
+		out(xtal, 0);
+		_delay_us(1);
+	}
+}
+
+
+/** Send a byte to an AVR ISP enabled chip and read a result.
+ * Since the AVR ISP is bidirectional, every byte out is also a byte in.
+ */
+static uint8_t
+isp_write(
+	uint8_t byte
+)
+{
+	const uint8_t mosi = prom_pin(prom->addr_pins[ISP_MOSI]);
+	const uint8_t sck = prom_pin(prom->addr_pins[ISP_SCK]);
+	const uint8_t miso = prom_pin(prom->data_pins[ISP_MISO]);
+	uint8_t rc = 0;
+
+	for (uint8_t i = 0 ; i < 8 ; i++, byte <<= 1)
+	{
+		out(mosi, (byte & 0x80) ? 1 : 0);
+		isp_clock(4);
+
+		out(sck, 1);
+		isp_clock(4);
+
+		rc = (rc << 1) | (in(miso) ? 1 : 0);
+		out(sck, 0);
+	}
+
+	return rc;
+}
+
+
+/** Enter programming mode for an ISP chip.
+ * \return 1 on success, 0 on failure.
+ */
+static int
+isp_setup(void)
+{
+	// Pulse the RESET pin, while holding SCK low.
+	const uint8_t sck = prom_pin(prom->addr_pins[ISP_SCK]);
+	const uint8_t reset = prom_pin(prom->addr_pins[ISP_RESET]);
+	const uint8_t miso = prom_pin(prom->data_pins[ISP_MISO]);
+	out(sck, 0);
+	out(reset, 1);
+	isp_clock(4);
+	out(reset, 0);
+	isp_clock(255);
+
+	// Now delay at least 20 ms
+	_delay_ms(20);
+
+	uint8_t rc1, rc2, rc3, rc4;
+
+	// Enter programming mode; enable pull up on the MISO pin
+	out(miso, 1);
+
+	rc1 = isp_write(0xAC);
+	rc2 = isp_write(0x53);
+	rc3 = isp_write(0x12);
+	rc4 = isp_write(0x34);
+
+	// Disable pull up
+	out(miso, 0);
+
+	if (rc3 == 0x53)
+		return 1;
+
+	// Now show what we read
+	uint8_t buf[10];
+	buf[0] = hexdigit(rc1 >> 4);
+	buf[1] = hexdigit(rc1 >> 0);
+	buf[2] = hexdigit(rc2 >> 4);
+	buf[3] = hexdigit(rc2 >> 0);
+	buf[4] = hexdigit(rc3 >> 4);
+	buf[5] = hexdigit(rc3 >> 0);
+	buf[6] = hexdigit(rc4 >> 4);
+	buf[7] = hexdigit(rc4 >> 0);
+
+	buf[8] = '\r';
+	buf[9] = '\n';
+
+	usb_serial_write(buf, sizeof(buf));
+	return 0;
+}
+
+
+/** Read a byte using the AVRISP, instead of the normal PROM format.
+ */
+static uint8_t
+isp_read(
+	uint32_t addr
+)
+{
+	uint8_t h = (addr >> 12) & 0x01;
+	uint8_t a = (addr >>  8) & 0x0F;
+	uint8_t b = (addr >>  0) & 0xFF;
+	isp_write(0x20 | (h ? 0x8 : 0));
+	isp_write(a);
+	isp_write(b);
+	return isp_write(0);
+}
+
+
+
+/** Configure all of the IO pins for the new PROM type */
+static void
+prom_setup(void)
+{
+	// Configure all of the address pins as outputs,
+	// pulled low for now
+	for (uint8_t i = 0 ; i < array_count(prom->addr_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->addr_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 1);
+	}
+
+	// Configure all of the data pins as inputs,
+	// no pull ups enabled.
+	for (uint8_t i = 0 ; i < array_count(prom->data_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->data_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 0);
+	}
+
+	// Configure all of the hi and low pins as outputs.
+	// Do the low pins first to bring them to ground potential,
+	// then the high pins.
+	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->lo_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 0);
+		ddr(pin, 1);
+	}
+
+	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
+	{
+		uint8_t pin = prom_pin(prom->hi_pins[i]);
+		if (pin == 0)
+			continue;
+		out(pin, 1);
+		ddr(pin, 1);
+	}
+
+
+	// Let things stabilize for a little while
+	_delay_ms(250);
+
+	// If this is an AVR ISP chip, try to go into programming mode
+	if (prom->data_width == 0)
+		isp_setup();
+}
+
+
+/** Switch all of the ZIF pins back to tri-state to make it safe.
+ * Doesn't matter what PROM is inserted.
+ */
+static void
+prom_tristate(void)
+{
+	for (uint8_t i = 1 ; i <= ZIF_PINS ; i++)
+	{
+		ddr(ports[i], 0);
+		out(ports[i], 0);
+	}
+}
+
 
 /** Select a 32-bit address for the current PROM */
 static void
@@ -265,6 +590,9 @@ prom_read(
 	uint32_t addr
 )
 {
+	if (prom->data_width == 0)
+		return isp_read(addr);
+
 	prom_set_address(addr);
 	for(uint8_t i = 0 ; i < 255; i++)
 	{
@@ -287,72 +615,6 @@ prom_read(
 	}
 
 	return old_r;
-}
-
-
-/** Configure all of the IO pins for the new PROM type */
-static void
-prom_setup(void)
-{
-	// Configure all of the address pins as outputs
-	for (uint8_t i = 0 ; i < prom->addr_width ; i++)
-		ddr(prom_pin(prom->addr_pins[i]), 1);
-
-	// Configure all of the data pins as inputs
-	for (uint8_t i = 0 ; i < prom->data_width ; i++)
-		ddr(prom_pin(prom->data_pins[i]), 0);
-
-	// Configure all of the hi and low pins as outputs
-	for (uint8_t i = 0 ; i < array_count(prom->hi_pins) ; i++)
-	{
-		uint8_t pin = prom_pin(prom->hi_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 1);
-		ddr(pin, 1);
-	}
-
-	for (uint8_t i = 0 ; i < array_count(prom->lo_pins) ; i++)
-	{
-		uint8_t pin = prom_pin(prom->lo_pins[i]);
-		if (pin == 0)
-			continue;
-		out(pin, 0);
-		ddr(pin, 1);
-	}
-
-	// Let things stabilize for a little while
-	_delay_ms(250);
-}
-
-
-/** Switch all of the ZIF pins back to tri-state to make it safe.
- * Doesn't matter what PROM is inserted.
- */
-static void
-prom_tristate(void)
-{
-	for (uint8_t i = 1 ; i <= 40 ; i++)
-	{
-		ddr(ports[i], 0);
-		out(ports[i], 0);
-	}
-}
-
-
-
-static uint8_t
-usb_serial_getchar_block(void)
-{
-	while (1)
-	{
-		while (usb_serial_available() == 0)
-			continue;
-
-		uint16_t c = usb_serial_getchar();
-		if (c != -1)
-			return c;
-	}
 }
 
 
@@ -422,7 +684,8 @@ hexdump(
 		buf[8 + 16*3 + i + 2] = printable(w) ? w : '.';
 	}
 
-	buf[8 + 16 * 3] = ' ';
+	buf[8 + 16 * 3 + 0] = ' ';
+	buf[8 + 16 * 3 + 1] = ' ';
 	buf[8 + 16 * 3 + 18] = '\r';
 	buf[8 + 16 * 3 + 19] = '\n';
 
@@ -452,7 +715,6 @@ read_addr(void)
 	send_str(PSTR("\r\n"));
 
 	prom_setup();
-	_delay_ms(100);
 
 	for (uint8_t line = 0 ; line < 4 ; line++)
 	{
@@ -533,85 +795,14 @@ prom_mode(void)
 }
 
 
-typedef struct
-{
-	uint8_t soh;
-	uint8_t block_num;
-	uint8_t block_num_complement;
-	uint8_t data[128];
-	uint8_t cksum;
-} __attribute__((__packed__))
-xmodem_block_t;
+static xmodem_block_t xmodem_block;
 
-#define XMODEM_SOH 0x01
-#define XMODEM_EOT 0x04
-#define XMODEM_ACK 0x06
-#define XMODEM_CAN 0x18
-#define XMODEM_C 0x43
-#define XMODEM_NAK 0x15
-#define XMODEM_EOF 0x1a
-
-
-/** Send a block.
- * Compute the checksum and complement.
- *
- * \return 0 if all is ok, -1 if a cancel is requested or more
- * than 10 retries occur.
- */
-static int
-xmodem_send_block(
-	xmodem_block_t * const block
-)
-{
-	// Compute the checksum and complement
-	uint8_t cksum = 0;
-	for (uint8_t i = 0 ; i < sizeof(block->data) ; i++)
-		cksum += block->data[i];
-	block->cksum = cksum;
-	block->block_num_complement = 0xFF - block->block_num;
-
-	// Send the block, and wait for an ACK
-	uint8_t retry_count = 0;
-	goto send_block;
-
-	while (retry_count++ < 10)
-	{
-		uint8_t c = usb_serial_getchar_block();
-		if (c == XMODEM_ACK)
-			return 0;
-		if (c == XMODEM_CAN)
-			return -1;
-		if (c != XMODEM_NAK)
-			continue;
-
-		send_block:
-		usb_serial_write((void*) block, sizeof(*block));
-	}
-
-	// Failure or cancel
-	return -1;
-}
-
-
-/** Send the entire PROM memory */
+/** Send the entire PROM memory via xmodem */
 static void
-xmodem_send(void)
+prom_send(void)
 {
-	uint8_t c;
-	static xmodem_block_t block;
-
-	block.soh = 0x01;
-	block.block_num = 0x00;
-
-	// wait for initial nak
-	while (1)
-	{
-		c = usb_serial_getchar_block();
-		if (c == XMODEM_NAK)
-			break;
-		if (c == XMODEM_CAN)
-			return;
-	}
+	if (xmodem_init(&xmodem_block) < 0)
+		return;
 
 	// Ending address
 	const uint32_t end_addr = (((uint32_t) 1) << prom->addr_width) - 1;
@@ -623,11 +814,10 @@ xmodem_send(void)
 	uint32_t addr = 0;
 	while (1)
 	{
-		block.block_num++;
-		for (uint8_t off = 0 ; off < sizeof(block.data) ; off++)
-			block.data[off] = prom_read(addr++);
+		for (uint8_t off = 0 ; off < sizeof(xmodem_block.data) ; off++)
+			xmodem_block.data[off] = prom_read(addr++);
 
-		if (xmodem_send_block(&block) < 0)
+		if (xmodem_send(&xmodem_block) < 0)
 			return;
 
 		// If we have wrapped the address, we are done
@@ -635,24 +825,9 @@ xmodem_send(void)
 			break;
 	}
 
-#if 0
-/* Don't send EOF?  rx adds it to the file? */
-	block.block_num++;
-	memset(block.data, XMODEM_EOF, sizeof(block.data));
-	if (xmodem_send_block(&block) < 0)
-		return;
-#endif
-
-	// File transmission complete.  send an EOT
-	while (1)
-	{
-		usb_serial_putchar(XMODEM_EOT);
-		c = usb_serial_getchar_block();
-		if (c == XMODEM_ACK
-		||  c == XMODEM_CAN)
-			break;
-	}
+	xmodem_fini(&xmodem_block);
 }
+
 
 
 
@@ -737,10 +912,11 @@ int main(void)
 		char c = usb_serial_getchar_echo();
 		switch (c)
 		{
-		case XMODEM_NAK: xmodem_send(); break;
+		case XMODEM_NAK: prom_send(); break;
 		case 'r': read_addr(); break;
 		case 'l': prom_list(); break;
 		case 'm': prom_mode(); break;
+		case 'i': isp_read(0); break;
 		case '\n': break;
 		case '\r': break;
 		default:
