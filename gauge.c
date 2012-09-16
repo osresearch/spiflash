@@ -59,9 +59,34 @@ int main(void)
 
 #define GAUGE1 0xC6
 
-	ddr(GAUGE1, 1);
-	out(GAUGE1, 0);
+	// OC1A, OC1B and OC1C are used for the RGB LED
+	// Configure OC1x in fast-PWM mode, 10-bit
+	sbi(TCCR1B, WGM12);
+	sbi(TCCR1A, WGM11);
+	sbi(TCCR1A, WGM10);
 
+	// Configure output mode to clear on match, set at top
+	sbi(TCCR1A, COM1A1);
+	cbi(TCCR1A, COM1A0);
+
+	sbi(TCCR1A, COM1B1);
+	cbi(TCCR1A, COM1B0);
+
+	sbi(TCCR1A, COM1C1);
+	cbi(TCCR1A, COM1C0);
+
+	// Configure clock 3 at clk/1
+	cbi(TCCR1B, CS12);
+	cbi(TCCR1B, CS11);
+	sbi(TCCR1B, CS10);
+
+	// Configure all of them as outputs
+	ddr(0xB5, 1);
+	ddr(0xB6, 1);
+	ddr(0xB7, 1);
+	
+
+	// OC3A is used for generating the miliamp output
 	// Configure OC3A in fast-PWM mode, 10-bit
 	sbi(TCCR3B, WGM32);
 	sbi(TCCR3A, WGM31);
@@ -76,11 +101,19 @@ int main(void)
 	cbi(TCCR3B, CS31);
 	sbi(TCCR3B, CS30);
 
+	ddr(GAUGE1, 1);
+	out(GAUGE1, 0);
+
+
 /*
 	// or configure output mode to clear on match, set at top
 	cbi(TCCR3A, COM3A1);
 	sbi(TCCR3A, COM3A0);
 */
+
+	OCR1A = 512;
+	OCR1B = 512;
+	OCR1C = 512;
 
 	OCR3A = 255;
 	uint16_t val = 0;
@@ -95,12 +128,14 @@ int main(void)
 		if (c == '!')
 		{
 			OCR3A = 0;
+			OCR1A = OCR1B = OCR1C = 0;
 			val = 0;
 			continue;
 		}
 		if (c == '@')
 		{
 			OCR3A = 1023;
+			OCR1A = OCR1B = OCR1C = 1023;
 			val = 0;
 			continue;
 		}
@@ -117,9 +152,24 @@ int main(void)
 			continue;
 		}
 
-		if ('A' <= c && c <= 'F')
+		if (c == 'B')
 		{
-			val = (val << 4) | (c - 'A' + 0xA);
+			OCR1A = 1023 - val;
+			val = 0;
+			continue;
+		}
+
+		if (c == 'G')
+		{
+			OCR1B = 1023 - val;
+			val = 0;
+			continue;
+		}
+
+		if (c == 'R')
+		{
+			OCR1C = 1023 - val;
+			val = 0;
 			continue;
 		}
 
