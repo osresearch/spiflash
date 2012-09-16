@@ -30,9 +30,11 @@ ddr(
 
 	switch (port)
 	{
+#if 0
 	case 0xA:
 		set_bit(DDRA, pin, value);
 		return;
+#endif
 	case 0xB:
 		set_bit(DDRB, pin, value);
 		return;
@@ -63,9 +65,11 @@ out(
 
 	switch (port)
 	{
+#if 0
 	case 0xA:
 		set_bit(PORTA, pin, value);
 		return;
+#endif
 	case 0xB:
 		set_bit(PORTB, pin, value);
 		return;
@@ -97,8 +101,10 @@ in(
 
 	switch (port)
 	{
+#if 0
 	case 0xA:
 		return get_bit(PINA, pin);
+#endif
 	case 0xB:
 		return get_bit(PINB, pin);
 	case 0xC:
