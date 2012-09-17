@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+use Time::HiRes 'usleep';
+use warnings;
+use strict;
+
+my $val = 0;
+
+while (1)
+{
+	$val = ($val + 1) & 0x3FF;
+	warn "$val\n";
+	my $x = sprintf "%03x\r\n", $val;
+	syswrite STDOUT, $x;
+	usleep 40000;
+
+	my $r = 0;
+	my $g = 0;
+	my $b = 0;
+	if ($val < 0x100)
+	{
+		# Nothing
+	}
+	elsif ($val < 0x200)
+	{
+		$g = ($val & 0xFF) * 4;
+	}
+	elsif ($val < 0x300)
+	{
+		$b = ($val & 0xFF) * 4;
+	}
+	elsif ($val < 0x400)
+	{
+		$r = ($val & 0xFF) * 4;
+	}
+
+	$x = sprintf "%03xR%03xG%03xB", $r, $g, $b;
+	syswrite STDOUT, $x;
+
+	warn "wrap\n" if $val == 0;
+}
