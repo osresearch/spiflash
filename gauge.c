@@ -30,6 +30,46 @@ hexdigit(
 }
 
 
+static void
+demo_mode(void)
+{
+	if (bit_is_clear(TIFR1, TOV1))
+		return;
+
+	sbi(TIFR1, TOV1);
+	static uint32_t val = 0;
+
+	//OCR1B = OCR1C = 0x3FF; // (val >> 8) & 0x3FF;
+#define FLASH_MASK (1ul << FLASH_BITS)
+#define FLASH_BITS 12
+
+	if ((val & FLASH_MASK) == 0)
+	{
+		uint8_t v = (val >> FLASH_BITS) & 0x7;
+
+		if (v & 4) // blue
+			OCR1A = 0x3FF;
+		else
+			OCR1A = 0x300;
+		if (v & 2) // green
+			OCR1B = 0x3FF;
+		else
+			OCR1B = 0x200;
+		if (v & 1) // red
+			OCR1C = 0x3FF;
+		else
+			OCR1C = 0x100;
+	}
+		
+	if (val == 0)
+		val = 0x280ul << 10;
+	else
+		val = val - 1;
+	
+	OCR3A = (val >> 10) & 0x3FF;
+}
+
+
 int main(void)
 {
 	// set for 16 MHz clock
@@ -44,19 +84,6 @@ int main(void)
 	// without a PC connected to the USB port, this 
 	// will wait forever.
 	usb_init();
-	while (!usb_configured()) /* wait */ ;
-	_delay_ms(1000);
-
-	// wait for the user to run their terminal emulator program
-	// which sets DTR to indicate it is ready to receive.
-	while (!(usb_serial_get_control() & USB_SERIAL_DTR))
-		continue;
-
-	// discard anything that was received prior.  Sometimes the
-	// operating system or other software will send a modem
-	// "AT command", which can still be buffered.
-	usb_serial_flush_input();
-
 #define GAUGE1 0xC6
 
 	// OC1A, OC1B and OC1C are used for the RGB LED
@@ -118,10 +145,39 @@ int main(void)
 	OCR3A = 255;
 	uint16_t val = 0;
 
+	// F7 is used for the switch input in pull-down mode
+	ddr(0xF7, 0);
+	out(0xF7, 1);
+
+	while (!usb_configured()) {
+		demo_mode();
+	}
+
+	_delay_ms(1000);
+
+	// wait for the user to run their terminal emulator program
+	// which sets DTR to indicate it is ready to receive.
+	while (!(usb_serial_get_control() & USB_SERIAL_DTR))
+	{
+		demo_mode();
+	}
+
+	// discard anything that was received prior.  Sometimes the
+	// operating system or other software will send a modem
+	// "AT command", which can still be buffered.
+	usb_serial_flush_input();
+
 	send_str(PSTR("badass gauge\r\n"));
 	while (1)
 	{
 		int c = usb_serial_getchar();
+
+		if (in(0xF7) == 0)
+		{
+			demo_mode();
+			continue;
+		}
+
 		if (c == -1)
 			continue;
 
