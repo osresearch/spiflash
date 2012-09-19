@@ -41,7 +41,7 @@
 
 
 # Target file name (without extension).
-TARGET = gauge
+TARGET = probe
 
 
 # List C source files here. (C dependencies are automatically generated.)

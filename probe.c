@@ -1,7 +1,6 @@
 /**
- * \file Badass gauge driver
+ * \file Generic serial and other probe for a Teensy
  *
- * Drives mA gauges via PWM.
  */
 
 #include <avr/io.h>
