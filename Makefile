@@ -46,6 +46,7 @@ TARGET = probe
 
 # List C source files here. (C dependencies are automatically generated.)
 SRC =	$(TARGET).c \
+	xmodem.c \
 	bits.c \
 	usb_serial.c \
 
