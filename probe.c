@@ -15,6 +15,32 @@
  *           WP   --- 3    6 --- SCLK    Green
  *   Black   GND  --- 4    5 --- SI      Blue
  *
+ * Bus pirate commands:
+ * 0x4B 01001011 -- power, no pullup, aux=1, cs=1
+ * 0x67 01100111 -- spi speed == 8 MHz
+ * 0x8A 10001010 -- spi config 3.3v, CKP idle low, CKE active to idle, sample middle
+ * 0x03 00000011 -- cs high
+ * 
+ * Manual mode:
+Bus Pirate v3b                                                                  
+Firmware v5.10 (r559)  Bootloader v4.4                                          
+DEVID:0x0447 REVID:0x3043 (24FJ64GA002 B5)                                      
+http://dangerousprototypes.com                                                  
+CFG1:0xFFDF CFG2:0xFF7F                                                         
+*----------*                                                                    
+Pinstates:                                                                      
+1.(BR)  2.(RD)  3.(OR)  4.(YW)  5.(GN)  6.(BL)  7.(PU)  8.(GR)  9.(WT)  0.(Blk) 
+GND     3.3V    5.0V    ADC     VPU     AUX     CLK     MOSI    CS      MISO    
+P       P       P       I       I       I       O       O       O       I       
+GND     3.22V   4.91V   0.00V   0.00V   L       L       L       H       H       
+Power supplies ON, Pull-up resistors OFF, Normal outputs (H=3.3v, L=GND)        
+MSB set: MOST sig bit first, Number of bits read/write: 8                       
+a/A/@ controls AUX pin                                                          
+SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )                                   
+*----------*                                           
+ *
+ * {0x95,0,0]
+ *
  */
 
 #include <avr/io.h>
@@ -32,6 +58,8 @@
 #define SPI_MISO 0xB3 // brown
 #define SPI_POW  0xB7 // red
 
+#undef CONFIG_SPI_HW
+
 static inline void
 spi_power(int i)
 {
@@ -41,7 +69,11 @@ spi_power(int i)
 static inline void
 spi_cs(int i)
 {
-	out(SPI_SS, !i);
+	//out(SPI_SS, !i);
+	if (i)
+		cbi(PORTB, 0);
+	else
+		sbi(PORTB, 0);
 }
 
 
@@ -63,16 +95,18 @@ spi_send(
 	uint8_t c
 )
 {
-	SPDR = c;
 	uint8_t bits[80];
 	uint8_t i = 0;
+#ifdef CONFIG_SPI_HW
+	SPDR = c;
 
 	while (bit_is_clear(SPSR, SPIF))
 	{
 		if (i == sizeof(bits) - 2 - 6)
 			continue;
 		//int x = in(SPI_MISO);
-		bits[i++] = hexdigit(PINB);
+		uint8_t x = PINB;
+		bits[i++] = hexdigit(x);
 	}
 
 	uint8_t val = SPDR;
@@ -86,6 +120,42 @@ spi_send(
 	bits[i++] = '\r';
 	bits[i++] = '\n';
 	usb_serial_write(bits, i);
+	return val;
+#else
+	// shift out and into one register
+	uint8_t val = c;
+	for (int i = 0 ; i < 8 ; i++)
+	{
+		out(SPI_MOSI, val & 0x80);
+		val <<= 1;
+		asm("nop");
+		asm("nop");
+		asm("nop");
+
+		out(SPI_SCLK, 1);
+
+		asm("nop");
+		asm("nop");
+		asm("nop");
+
+		if (in(SPI_MISO))
+			val |= 1;
+
+		out(SPI_SCLK, 0);
+	}
+
+	out(SPI_MOSI, 0); // return to zero
+#endif
+
+	bits[i++] = hexdigit(c >> 4);
+	bits[i++] = hexdigit(c >> 0);
+	bits[i++] = '-';
+	bits[i++] = hexdigit(val >> 4);
+	bits[i++] = hexdigit(val >> 0);
+	bits[i++] = '\r';
+	bits[i++] = '\n';
+	usb_serial_write(bits, i);
+
 	return val;
 }
 
@@ -117,17 +187,29 @@ spi_rdid(void)
 	//_delay_ms(2);
 
 	spi_cs(1);
-	//_delay_ms(1);
+	_delay_us(100);
 
+#if 0
+	// RES -- read electronic id
+	spi_send(0x90);
+	spi_send(0x0);
+	spi_send(0x0);
+	spi_send(0x1);
+	uint8_t b1 = spi_send(0xFF);
+	uint8_t b2 = spi_send(0xFF);
+	uint8_t b3 = 0;
+	uint8_t b4 = 0;
+#else
 	// JEDEC RDID: 1 byte out, three bytes back
 	spi_send(0x9F);
 
 	// read 3 bytes back
-	uint8_t b1 = spi_send(0x00);
-	uint8_t b2 = spi_send(0x00);
-	uint8_t b3 = spi_send(0x00);
-	//uint8_t b4 = spi_send(0x00);
-	uint8_t b4 = 99;
+	uint8_t b1 = spi_send(0x01);
+	uint8_t b2 = spi_send(0x02);
+	uint8_t b3 = spi_send(0x04);
+	uint8_t b4 = spi_send(0x17);
+	//uint8_t b4 = 99;
+#endif
 
 	spi_cs(0);
 	_delay_ms(1);
@@ -203,6 +285,7 @@ int main(void)
 	while (!usb_configured())
 		continue;
 
+	// turn on led
 	ddr(0xD6, 1);
 	out(0xD6, 1);
 
@@ -223,29 +306,37 @@ int main(void)
 	ddr(SPI_MOSI, 1);
 	ddr(SPI_SCLK, 1);
 	ddr(SPI_SS, 1);
-	ddr(SPI_POW, 1);
+	//ddr(SPI_POW, 1); // do not enable power pin for now
 
 	// No pull ups enabled
 	out(SPI_MISO, 0);
+
+	// just to be sure that MISO is configured correctly
+	cbi(PORTB, 3); // no pull up
+	cbi(DDRB, 3);
 
 	// keep it off and unselected
 	spi_power(0);
 	spi_cs(0);
 
+	send_str(PSTR("spi\r\n"));
+
+#ifdef CONFIG_SPI_HW
 	// Enable SPI in master mode, clock/128
-	// Clocked on falling edge (CPHA=1, PIC terms == CKP=0, CKE=1)
+	// Clocked on falling edge (CPOL=0, CPHA=1, PIC terms == CKP=0, CKE=1)
 	SPCR = 0
 		| (1 << SPE)
 		| (1 << MSTR)
 		| (1 << SPR1)
 		| (1 << SPR0)
 		| (0 << CPOL)
-		| (1 << CPHA)
+		| (0 << CPHA)
 		;
 
 	// Wait for any transactions to complete (shouldn't happen)
 	if (bit_is_set(SPCR, SPIF))
 		(void) SPDR;
+#endif
 
 	while (1)
 	{
@@ -256,6 +347,12 @@ int main(void)
 		{
 		case 'i': spi_rdid(); break;
 		case 'r': spi_read(1); break;
+		case 'x': {
+			uint8_t x = DDRB;
+			usb_serial_putchar(hexdigit(x >> 4));
+			usb_serial_putchar(hexdigit(x >> 0));
+			break;
+		}
 		default:
 			usb_serial_putchar('?');
 			break;
