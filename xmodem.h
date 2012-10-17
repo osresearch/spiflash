@@ -29,13 +29,15 @@ xmodem_block_t;
 
 int
 xmodem_init(
-	xmodem_block_t * const block
+	xmodem_block_t * const block,
+	int already_received_first_nak
 );
 
 
 int
 xmodem_send(
-	xmodem_block_t * const block
+	xmodem_block_t * const block,
+	int wait_for_ack
 );
 
 

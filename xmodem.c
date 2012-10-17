@@ -23,7 +23,8 @@
  */
 int
 xmodem_send(
-	xmodem_block_t * const block
+	xmodem_block_t * const block,
+	int wait_for_ack
 )
 {
 	// Compute the checksum and complement
@@ -41,7 +42,6 @@ xmodem_send(
 	while (retry_count++ < 10)
 	{
 		usb_serial_write((void*) block, sizeof(*block));
-
 		// Wait for an ACK (done), CAN (abort) or NAK (retry)
 		while (1)
 		{
@@ -52,6 +52,9 @@ xmodem_send(
 				return -1;
 			if (c == XMODEM_NAK)
 				break;
+
+			if (!wait_for_ack)
+				return 0;
 		}
 	}
 
@@ -62,11 +65,15 @@ xmodem_send(
 
 int
 xmodem_init(
-	xmodem_block_t * const block
+	xmodem_block_t * const block,
+	int already_received_first_nak
 )
 {
 	block->soh = 0x01;
 	block->block_num = 0x00;
+
+	if (already_received_first_nak)
+		return 0;
 
 	// wait for initial nak
 	while (1)

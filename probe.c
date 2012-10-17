@@ -292,7 +292,9 @@ static xmodem_block_t xmodem_block;
 static void
 prom_send(void)
 {
-	if (xmodem_init(&xmodem_block) < 0)
+	// We have already received the first nak.
+	// Fire it up!
+	if (xmodem_init(&xmodem_block, 1) < 0)
 		return;
 
 	//const uint32_t end_addr = 8L << 20;
@@ -316,7 +318,7 @@ prom_send(void)
 
 		spi_cs(0);
 
-		if (xmodem_send(&xmodem_block) < 0)
+		if (xmodem_send(&xmodem_block, 1) < 0)
 			return;
 
 		addr += sizeof(xmodem_block.data);
@@ -383,13 +385,13 @@ int main(void)
 	send_str(PSTR("spi\r\n"));
 
 #ifdef CONFIG_SPI_HW
-	// Enable SPI in master mode, clock/128
+	// Enable SPI in master mode, clock/16 == 1 MHz
 	// Clocked on falling edge (CPOL=0, CPHA=1, PIC terms == CKP=0, CKE=1)
 	SPCR = 0
 		| (1 << SPE)
 		| (1 << MSTR)
-		| (1 << SPR1)
-		| (0 << SPR0)
+		| (0 << SPR1)
+		| (1 << SPR0)
 		| (0 << CPOL)
 		| (0 << CPHA)
 		;
