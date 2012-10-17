@@ -58,7 +58,7 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #define SPI_MISO 0xB3 // brown
 #define SPI_POW  0xB7 // red
 
-#undef CONFIG_SPI_HW
+#define CONFIG_SPI_HW
 
 static inline void
 spi_power(int i)
@@ -102,15 +102,18 @@ spi_send(
 
 	while (bit_is_clear(SPSR, SPIF))
 	{
+#ifdef CONFIG_SPI_DEBUG
 		if (i == sizeof(bits) - 2 - 6)
 			continue;
 		//int x = in(SPI_MISO);
 		uint8_t x = PINB;
 		bits[i++] = hexdigit(x);
+#endif
 	}
 
 	uint8_t val = SPDR;
 
+#ifdef CONFIG_SPI_DEBUG
 	bits[i++] = ' ';
 	bits[i++] = hexdigit(c >> 4);
 	bits[i++] = hexdigit(c >> 0);
@@ -120,6 +123,7 @@ spi_send(
 	bits[i++] = '\r';
 	bits[i++] = '\n';
 	usb_serial_write(bits, i);
+#endif
 	return val;
 #else
 	// shift out and into one register
@@ -328,7 +332,7 @@ int main(void)
 		| (1 << SPE)
 		| (1 << MSTR)
 		| (1 << SPR1)
-		| (1 << SPR0)
+		| (0 << SPR0)
 		| (0 << CPOL)
 		| (0 << CPHA)
 		;
