@@ -295,7 +295,8 @@ prom_send(void)
 	if (xmodem_init(&xmodem_block) < 0)
 		return;
 
-	const uint32_t end_addr = 0x10000L;
+	//const uint32_t end_addr = 8L << 20;
+	const uint32_t end_addr = 8L << 20;
 
 	spi_power(1);
 	_delay_ms(1);
@@ -410,7 +411,6 @@ int main(void)
 		{
 		case 'i': spi_rdid(); break;
 		case 'r': spi_read(1); break;
-		case XMODEM_C:
 		case XMODEM_NAK:
 			prom_send();
 			send_str(PSTR("xmodem done\r\n"));
