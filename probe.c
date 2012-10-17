@@ -51,6 +51,7 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #include <util/delay.h>
 #include "usb_serial.h"
 #include "bits.h"
+#include "xmodem.h"
 
 #define SPI_SS   0xB0 // white
 #define SPI_SCLK 0xB1 // green
@@ -89,6 +90,19 @@ hexdigit(
 		return x + 'A' - 0xA;
 }
 
+
+// Send a string to the USB serial port.  The string must be in
+// flash memory, using PSTR
+//
+void send_str(const char *s)
+{
+	char c;
+	while (1) {
+		c = pgm_read_byte(s++);
+		if (!c) break;
+		usb_serial_putchar(c);
+	}
+}
 
 static inline uint8_t
 spi_send(
@@ -272,6 +286,48 @@ spi_read(uint16_t page)
 	usb_serial_write(buf, off);
 }
 
+
+static xmodem_block_t xmodem_block;
+
+static void
+prom_send(void)
+{
+	if (xmodem_init(&xmodem_block) < 0)
+		return;
+
+	const uint32_t end_addr = 0x10000L;
+
+	spi_power(1);
+	_delay_ms(1);
+
+	uint32_t addr = 0;
+
+	while (1)
+	{
+		spi_cs(1);
+		spi_send(0x03); // read
+		spi_send(addr >> 16);
+		spi_send(addr >>  8);
+		spi_send(addr >>  0);
+
+		for (uint8_t off = 0 ; off < sizeof(xmodem_block.data) ; off++)
+			xmodem_block.data[off] = spi_send(0);
+
+		spi_cs(0);
+
+		if (xmodem_send(&xmodem_block) < 0)
+			return;
+
+		addr += sizeof(xmodem_block.data);
+		if (addr >= end_addr)
+			break;
+	}
+
+	spi_power(0);
+
+	xmodem_fini(&xmodem_block);
+}
+
 int main(void)
 {
 	// set for 16 MHz clock
@@ -344,13 +400,21 @@ int main(void)
 
 	while (1)
 	{
-		int c = usb_serial_getchar();
-		if (c == -1)
+		usb_serial_putchar('>');
+
+		int c;
+		while ((c = usb_serial_getchar()) == -1)
 			continue;
+
 		switch(c)
 		{
 		case 'i': spi_rdid(); break;
 		case 'r': spi_read(1); break;
+		case XMODEM_C:
+		case XMODEM_NAK:
+			prom_send();
+			send_str(PSTR("xmodem done\r\n"));
+			break;
 		case 'x': {
 			uint8_t x = DDRB;
 			usb_serial_putchar(hexdigit(x >> 4));
@@ -363,18 +427,4 @@ int main(void)
 		}
 	}
 
-}
-
-
-// Send a string to the USB serial port.  The string must be in
-// flash memory, using PSTR
-//
-void send_str(const char *s)
-{
-	char c;
-	while (1) {
-		c = pgm_read_byte(s++);
-		if (!c) break;
-		usb_serial_putchar(c);
-	}
 }
