@@ -249,9 +249,117 @@ spi_rdid(void)
 	usb_serial_write(buf, off);
 }
 
-static void
-spi_read(uint16_t page)
+static uint8_t
+spi_status(void)
 {
+	spi_cs(1);
+	spi_send(0x05);
+	uint8_t r1 = spi_send(0x00);
+	spi_cs(0);
+	return r1;
+}
+
+
+static uint32_t
+usb_serial_readhex(void)
+{
+	uint32_t val = 0;
+
+	while (1)
+	{
+		int c = usb_serial_getchar();
+		if (c == -1)
+			continue;
+		if ('0' <= c && c <= '9')
+			val = (val << 4) | (c - '0');
+		else
+		if ('A' <= c && c <= 'F')
+			val = (val << 4) | (c - 'A' + 0xA);
+		else
+		if ('a' <= c && c <= 'f')
+			val = (val << 4) | (c - 'a' + 0xA);
+		else
+			return val;
+	}
+}
+
+
+#define SPI_WIP 1
+#define SPI_WEL 2
+
+static void
+spi_write_enable(void)
+{
+	spi_power(1);
+	_delay_ms(2);
+
+	uint8_t r1 = spi_status();
+
+	spi_cs(1);
+	spi_send(0x06);
+	spi_cs(0);
+
+	uint8_t r2 = spi_status();
+
+	char buf[16];
+	uint8_t off =0;
+	buf[off++] = hexdigit(r1 >> 4);
+	buf[off++] = hexdigit(r1 >> 0);
+	buf[off++] = ' ';
+	buf[off++] = hexdigit(r2 >> 4);
+	buf[off++] = hexdigit(r2 >> 0);
+	if ((r2 & SPI_WEL) == 0)
+		buf[off++] = '!';
+
+	buf[off++] = '\r';
+	buf[off++] = '\n';
+	usb_serial_write(buf, off);
+}
+
+static void
+spi_erase_sector(void)
+{
+	uint32_t addr = usb_serial_readhex();
+
+	if ((spi_status() & SPI_WEL) == 0)
+	{
+		send_str(PSTR("wp!\r\n"));
+		return;
+	}
+
+	spi_cs(1);
+	spi_send(0x20);
+	spi_send(addr >> 16);
+	spi_send(addr >>  8);
+	spi_send(addr >>  0);
+
+	spi_cs(0);
+
+	while (spi_status() & SPI_WIP)
+		;
+
+	char buf[16];
+	uint8_t off = 0;
+	buf[off++] = 'E';
+	buf[off++] = hexdigit(addr >> 20);
+	buf[off++] = hexdigit(addr >> 16);
+	buf[off++] = hexdigit(addr >> 12);
+	buf[off++] = hexdigit(addr >>  8);
+	buf[off++] = hexdigit(addr >>  4);
+	buf[off++] = hexdigit(addr >>  0);
+	buf[off++] = '\r';
+	buf[off++] = '\n';
+
+	usb_serial_write(buf, off);
+}
+	
+
+
+static void
+spi_read(void)
+{
+	uint32_t addr = usb_serial_readhex();
+
 	spi_power(1);
 	_delay_ms(2);
 
@@ -260,9 +368,9 @@ spi_read(uint16_t page)
 
 	// read a page
 	spi_send(0x03);
-	spi_send(page >> 8);
-	spi_send(page >> 0);
-	spi_send(0);
+	spi_send(addr >> 16);
+	spi_send(addr >>  8);
+	spi_send(addr >>  0);
 
 	uint8_t data[16];
 
@@ -391,7 +499,7 @@ int main(void)
 		| (1 << SPE)
 		| (1 << MSTR)
 		| (0 << SPR1)
-		| (1 << SPR0)
+		| (0 << SPR0)
 		| (0 << CPOL)
 		| (0 << CPHA)
 		;
@@ -412,7 +520,9 @@ int main(void)
 		switch(c)
 		{
 		case 'i': spi_rdid(); break;
-		case 'r': spi_read(1); break;
+		case 'r': spi_read(); break;
+		case 'w': spi_write_enable(); break;
+		case 'e': spi_erase_sector(); break;
 		case XMODEM_NAK:
 			prom_send();
 			send_str(PSTR("xmodem done\r\n"));
