@@ -61,6 +61,9 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 
 #define CONFIG_SPI_HW
 
+static xmodem_block_t xmodem_block;
+
+
 static inline void
 spi_power(int i)
 {
@@ -316,6 +319,63 @@ spi_write_enable(void)
 	usb_serial_write(buf, off);
 }
 
+
+static void
+spi_upload(void)
+{
+	uint32_t addr = usb_serial_readhex();
+
+	if ((spi_status() & SPI_WEL) == 0)
+	{
+		send_str(PSTR("wp!\r\n"));
+		return;
+	}
+
+	usb_serial_putchar('G');
+
+	uint16_t offset = 0;
+	const size_t chunk_size = sizeof(xmodem_block.data);
+	uint8_t * const buf = xmodem_block.data;
+
+	for (offset = 0 ; offset < 4096 ; offset += chunk_size)
+	{
+		// read 128 bytes into the xmodem data block
+		for (uint8_t i = 0 ; i < chunk_size; i++)
+		{
+			int c;
+			while ((c = usb_serial_getchar()) == -1)
+				;
+			buf[i] = c;
+		}
+
+		spi_cs(1);
+		spi_send(0x06);
+		spi_cs(0);
+
+		uint8_t r2 = spi_status();
+
+		spi_cs(1);
+		spi_send(0x02);
+		spi_send(addr >> 16);
+		spi_send(addr >>  8);
+		spi_send(addr >>  0);
+			
+		for (uint8_t i = 0 ; i < chunk_size ; i++)
+			spi_send(buf[i]);
+
+		spi_cs(0);
+
+		// wait for write to finish
+		while (spi_status() & SPI_WIP)
+			;
+		usb_serial_putchar('.');
+		addr += chunk_size;
+	}
+
+	send_str(PSTR("done!\r\n"));
+}
+
+
 static void
 spi_erase_sector(void)
 {
@@ -394,8 +454,6 @@ spi_read(void)
 	usb_serial_write(buf, off);
 }
 
-
-static xmodem_block_t xmodem_block;
 
 static void
 prom_send(void)
@@ -523,6 +581,7 @@ int main(void)
 		case 'r': spi_read(); break;
 		case 'w': spi_write_enable(); break;
 		case 'e': spi_erase_sector(); break;
+		case 'u': spi_upload(); break;
 		case XMODEM_NAK:
 			prom_send();
 			send_str(PSTR("xmodem done\r\n"));
