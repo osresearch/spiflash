@@ -499,9 +499,9 @@ prom_send(void)
 
 int main(void)
 {
-	// set for 16 MHz clock
+	// set for 8 MHz clock since we are running at 3.3 V
 #define CPU_PRESCALE(n) (CLKPR = 0x80, CLKPR = (n))
-	CPU_PRESCALE(0);
+	CPU_PRESCALE(1);
 
 	// Disable the ADC
 	ADMUX = 0;
@@ -551,7 +551,7 @@ int main(void)
 	send_str(PSTR("spi\r\n"));
 
 #ifdef CONFIG_SPI_HW
-	// Enable SPI in master mode, clock/16 == 1 MHz
+	// Enable SPI in master mode, clock/16 == 500 KHz
 	// Clocked on falling edge (CPOL=0, CPHA=1, PIC terms == CKP=0, CKE=1)
 	SPCR = 0
 		| (1 << SPE)
