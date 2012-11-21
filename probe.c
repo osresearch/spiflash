@@ -455,6 +455,41 @@ spi_read(void)
 }
 
 
+/** Read the entire ROM out to the serial port. */
+static void
+spi_dump(void)
+{
+	const uint32_t end_addr = 8L << 20;
+
+	spi_power(1);
+	_delay_ms(1);
+
+	uint32_t addr = 0;
+	uint8_t buf[64];
+
+	while (1)
+	{
+		spi_cs(1);
+		spi_send(0x03); // read
+		spi_send(addr >> 16);
+		spi_send(addr >>  8);
+		spi_send(addr >>  0);
+
+		for (uint8_t off = 0 ; off < sizeof(buf) ; off++)
+			buf[off] = spi_send(0);
+
+		spi_cs(0);
+
+		usb_serial_write(buf, sizeof(buf));
+
+		addr += sizeof(buf);
+		if (addr >= end_addr)
+			break;
+	}
+
+	spi_power(0);
+}
+
 static void
 prom_send(void)
 {
@@ -579,6 +614,7 @@ int main(void)
 		{
 		case 'i': spi_rdid(); break;
 		case 'r': spi_read(); break;
+		case 'R': spi_dump(); break;
 		case 'w': spi_write_enable(); break;
 		case 'e': spi_erase_sector(); break;
 		case 'u': spi_upload(); break;
