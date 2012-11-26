@@ -59,6 +59,27 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #define SPI_MISO 0xB3 // brown
 #define SPI_POW  0xB7 // red
 
+#define SPI_PAGE_SIZE	4096
+#define SPI_PAGE_MASK	(SPI_PAGE_SIZE - 1)
+
+
+static int
+usb_serial_getchar_echo()
+{
+	while (1)
+	{
+		int c = usb_serial_getchar();
+		if (c == -1)
+			continue;
+
+		usb_serial_putchar(c);
+		if (c == '\r')
+			usb_serial_putchar('\n');
+		return c;
+	}
+}
+
+
 #define CONFIG_SPI_HW
 
 static xmodem_block_t xmodem_block;
@@ -184,9 +205,7 @@ spi_send(
 static void
 spi_passthrough(void)
 {
-	int c;
-	while ((c = usb_serial_getchar()) == -1)
-		;
+	int c = usb_serial_getchar_echo();
 
 	SPDR = c;
 	while (bit_is_clear(SPSR, SPIF))
@@ -270,9 +289,7 @@ usb_serial_readhex(void)
 
 	while (1)
 	{
-		int c = usb_serial_getchar();
-		if (c == -1)
-			continue;
+		int c = usb_serial_getchar_echo();
 		if ('0' <= c && c <= '9')
 			val = (val << 4) | (c - '0');
 		else
@@ -289,6 +306,7 @@ usb_serial_readhex(void)
 
 #define SPI_WIP 1
 #define SPI_WEL 2
+#define SPI_WRITE_ENABLE 0x06
 
 static void
 spi_write_enable(void)
@@ -299,16 +317,20 @@ spi_write_enable(void)
 	uint8_t r1 = spi_status();
 
 	spi_cs(1);
-	spi_send(0x06);
+	spi_send(SPI_WRITE_ENABLE);
 	spi_cs(0);
+}
+
+
+static void
+spi_write_enable_interactive(void)
+{
+	spi_write_enable();
 
 	uint8_t r2 = spi_status();
 
 	char buf[16];
 	uint8_t off =0;
-	buf[off++] = hexdigit(r1 >> 4);
-	buf[off++] = hexdigit(r1 >> 0);
-	buf[off++] = ' ';
 	buf[off++] = hexdigit(r2 >> 4);
 	buf[off++] = hexdigit(r2 >> 0);
 	if ((r2 & SPI_WEL) == 0)
@@ -320,83 +342,36 @@ spi_write_enable(void)
 }
 
 
-static void
-spi_upload(void)
-{
-	uint32_t addr = usb_serial_readhex();
-
-	if ((spi_status() & SPI_WEL) == 0)
-	{
-		send_str(PSTR("wp!\r\n"));
-		return;
-	}
-
-	usb_serial_putchar('G');
-
-	uint16_t offset = 0;
-	const size_t chunk_size = sizeof(xmodem_block.data);
-	uint8_t * const buf = xmodem_block.data;
-
-	for (offset = 0 ; offset < 4096 ; offset += chunk_size)
-	{
-		// read 128 bytes into the xmodem data block
-		for (uint8_t i = 0 ; i < chunk_size; i++)
-		{
-			int c;
-			while ((c = usb_serial_getchar()) == -1)
-				;
-			buf[i] = c;
-		}
-
-		spi_cs(1);
-		spi_send(0x06);
-		spi_cs(0);
-
-		uint8_t r2 = spi_status();
-
-		spi_cs(1);
-		spi_send(0x02);
-		spi_send(addr >> 16);
-		spi_send(addr >>  8);
-		spi_send(addr >>  0);
-			
-		for (uint8_t i = 0 ; i < chunk_size ; i++)
-			spi_send(buf[i]);
-
-		spi_cs(0);
-
-		// wait for write to finish
-		while (spi_status() & SPI_WIP)
-			;
-		usb_serial_putchar('.');
-		addr += chunk_size;
-	}
-
-	send_str(PSTR("done!\r\n"));
-}
-
 
 static void
-spi_erase_sector(void)
+spi_erase_sector(
+	uint32_t addr
+)
 {
-	uint32_t addr = usb_serial_readhex();
-
-	if ((spi_status() & SPI_WEL) == 0)
-	{
-		send_str(PSTR("wp!\r\n"));
-		return;
-	}
-
 	spi_cs(1);
 	spi_send(0x20);
 	spi_send(addr >> 16);
 	spi_send(addr >>  8);
 	spi_send(addr >>  0);
-
 	spi_cs(0);
 
 	while (spi_status() & SPI_WIP)
 		;
+}
+
+
+static void
+spi_erase_sector_interactive(void)
+{
+	uint32_t addr = usb_serial_readhex();
+
+	if ((spi_status() & SPI_WEL) == 0)
+	{
+		send_str(PSTR("wp!\r\n"));
+		return;
+	}
+
+	spi_erase_sector(addr);
 
 	char buf[16];
 	uint8_t off = 0;
@@ -532,6 +507,103 @@ prom_send(void)
 	xmodem_fini(&xmodem_block);
 }
 
+
+/** Write some number of pages into the PROM. */
+static void
+spi_upload(void)
+{
+	uint32_t addr = usb_serial_readhex();
+	uint32_t len = usb_serial_readhex();
+
+	// addr and len must be 4k aligned
+	const int fail = ((len & SPI_PAGE_MASK) != 0) || ((addr & SPI_PAGE_MASK) != 0);
+
+	char outbuf[32];
+	uint8_t off = 0;
+	
+	outbuf[off++] = fail ? '!' : 'G';
+	outbuf[off++] = ' ';
+	outbuf[off++] = hexdigit(addr >> 20);
+	outbuf[off++] = hexdigit(addr >> 16);
+	outbuf[off++] = hexdigit(addr >> 12);
+	outbuf[off++] = hexdigit(addr >>  8);
+	outbuf[off++] = hexdigit(addr >>  4);
+	outbuf[off++] = hexdigit(addr >>  0);
+	outbuf[off++] = ' ';
+	outbuf[off++] = hexdigit(len >> 20);
+	outbuf[off++] = hexdigit(len >> 16);
+	outbuf[off++] = hexdigit(len >> 12);
+	outbuf[off++] = hexdigit(len >>  8);
+	outbuf[off++] = hexdigit(len >>  4);
+	outbuf[off++] = hexdigit(len >>  0);
+	outbuf[off++] = '\r';
+	outbuf[off++] = '\n';
+
+	usb_serial_write(outbuf, off);
+	if (fail)
+		return;
+
+
+	uint32_t offset = 0;
+	const size_t chunk_size = sizeof(xmodem_block.data);
+	uint8_t * const buf = xmodem_block.data;
+
+	for (offset = 0 ; offset < len ; offset += chunk_size)
+	{
+		// read 128 bytes into the xmodem data block
+		for (uint8_t i = 0 ; i < chunk_size; i++)
+		{
+			int c;
+			while ((c = usb_serial_getchar()) == -1)
+				;
+			buf[i] = c;
+		}
+
+		if ((addr & SPI_PAGE_MASK) == 0)
+		{
+			// new sector; erase this one
+			spi_write_enable();
+			spi_erase_sector(addr);
+
+			off = 0;
+			outbuf[off++] = hexdigit(addr >> 20);
+			outbuf[off++] = hexdigit(addr >> 16);
+			outbuf[off++] = hexdigit(addr >> 12);
+			outbuf[off++] = hexdigit(addr >>  8);
+			outbuf[off++] = hexdigit(addr >>  4);
+			outbuf[off++] = hexdigit(addr >>  0);
+			outbuf[off++] = '\r';
+			outbuf[off++] = '\n';
+			usb_serial_write(outbuf, off);
+		}
+			
+
+		spi_write_enable();
+		uint8_t r2 = spi_status();
+
+		spi_cs(1);
+		spi_send(0x02);
+		spi_send(addr >> 16);
+		spi_send(addr >>  8);
+		spi_send(addr >>  0);
+			
+		for (uint8_t i = 0 ; i < chunk_size ; i++)
+			spi_send(buf[i]);
+
+		spi_cs(0);
+
+		// wait for write to finish
+		while (spi_status() & SPI_WIP)
+			;
+
+		//usb_serial_putchar('.');
+		addr += chunk_size;
+	}
+
+	send_str(PSTR("done!\r\n"));
+}
+
+
 int main(void)
 {
 	// set for 8 MHz clock since we are running at 3.3 V
@@ -608,15 +680,15 @@ int main(void)
 
 		int c;
 		while ((c = usb_serial_getchar()) == -1)
-			continue;
+			;
 
 		switch(c)
 		{
 		case 'i': spi_rdid(); break;
 		case 'r': spi_read(); break;
 		case 'R': spi_dump(); break;
-		case 'w': spi_write_enable(); break;
-		case 'e': spi_erase_sector(); break;
+		case 'w': spi_write_enable_interactive(); break;
+		case 'e': spi_erase_sector_interactive(); break;
 		case 'u': spi_upload(); break;
 		case XMODEM_NAK:
 			prom_send();
