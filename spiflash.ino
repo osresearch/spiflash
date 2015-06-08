@@ -57,8 +57,9 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 static inline void
 spi_cs(int i)
 {
-	digitalWrite(SPI_CS, i);
+	digitalWrite(SPI_CS, !i);
 }
+
 
 void
 setup()
