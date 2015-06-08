@@ -29,7 +29,8 @@ xmodem_send(
 {
 	// Compute the checksum and complement
 	uint8_t cksum = 0;
-	for (uint8_t i = 0 ; i < sizeof(block->data) ; i++)
+	uint8_t i;
+	for (i = 0 ; i < sizeof(block->data) ; i++)
 		cksum += block->data[i];
 
 	block->cksum = cksum;

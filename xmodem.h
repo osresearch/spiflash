@@ -26,6 +26,9 @@ xmodem_block_t;
 #define XMODEM_NAK 0x15
 #define XMODEM_EOF 0x1a
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 int
 xmodem_init(
@@ -45,5 +48,8 @@ int xmodem_fini(
 	xmodem_block_t * const block
 );
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif

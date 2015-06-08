@@ -1,5 +1,5 @@
 /**
- * \file SPI Flash reader.
+ * \file SPI Flash reader for the Teensy 3.
  *
  * Very fast reader for SPI flashes.
  *
@@ -42,39 +42,62 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
  * {0x95,0,0]
  *
  */
-
-#include <avr/io.h>
-#include <avr/pgmspace.h>
-#include <avr/interrupt.h>
-#include <stdint.h>
-#include <string.h>
-#include <util/delay.h>
-#include "usb_serial.h"
-#include "bits.h"
+#include <SPI.h>
 #include "xmodem.h"
 
-#define SPI_SS   0xB0 // white
-#define SPI_SCLK 0xB1 // green
-#define SPI_MOSI 0xB2 // blue
-#define SPI_MISO 0xB3 // brown
-#define SPI_POW  0xB7 // red
+#define SPI_CS   10 // white
+#define SPI_SCLK 13 // green
+#define SPI_MOSI 11 // blue
+#define SPI_MISO 12 // brown
 
 #define SPI_PAGE_SIZE	4096
 #define SPI_PAGE_MASK	(SPI_PAGE_SIZE - 1)
 
+
+static inline void
+spi_cs(int i)
+{
+	digitalWrite(SPI_CS, i);
+}
+
+void
+setup()
+{
+	Serial.begin(115200);
+	SPI.begin();
+	
+	// keep it off and unselected
+	pinMode(SPI_CS, OUTPUT);
+	spi_cs(0);
+
+#ifdef CONFIG_SPI_HW
+	// Enable SPI in master mode, clock/16 == 500 KHz
+	// Clocked on falling edge (CPOL=0, CPHA=1, PIC terms == CKP=0, CKE=1)
+	SPCR = 0
+		| (1 << SPE)
+		| (1 << MSTR)
+		| (0 << SPR1)
+		| (0 << SPR0)
+		| (0 << CPOL)
+		| (0 << CPHA)
+		;
+#endif
+}
 
 static int
 usb_serial_getchar_echo()
 {
 	while (1)
 	{
-		int c = usb_serial_getchar();
+		int c = Serial.read();
 		if (c == -1)
 			continue;
 
-		usb_serial_putchar(c);
+		// echo back to the serial port
+		Serial.print(c);
 		if (c == '\r')
-			usb_serial_putchar('\n');
+			Serial.print('\n');
+
 		return c;
 	}
 }
@@ -83,23 +106,6 @@ usb_serial_getchar_echo()
 #define CONFIG_SPI_HW
 
 static xmodem_block_t xmodem_block;
-
-
-static inline void
-spi_power(int i)
-{
-	out(SPI_POW, i);
-}
-
-static inline void
-spi_cs(int i)
-{
-	//out(SPI_SS, !i);
-	if (i)
-		cbi(PORTB, 0);
-	else
-		sbi(PORTB, 0);
-}
 
 
 static char
@@ -115,107 +121,12 @@ hexdigit(
 }
 
 
-// Send a string to the USB serial port.  The string must be in
-// flash memory, using PSTR
-//
-void send_str(const char *s)
-{
-	char c;
-	while (1) {
-		c = pgm_read_byte(s++);
-		if (!c) break;
-		usb_serial_putchar(c);
-	}
-}
-
 static inline uint8_t
 spi_send(
 	uint8_t c
 )
 {
-	uint8_t bits[80];
-	uint8_t i = 0;
-#ifdef CONFIG_SPI_HW
-	SPDR = c;
-
-	while (bit_is_clear(SPSR, SPIF))
-	{
-#ifdef CONFIG_SPI_DEBUG
-		if (i == sizeof(bits) - 2 - 6)
-			continue;
-		//int x = in(SPI_MISO);
-		uint8_t x = PINB;
-		bits[i++] = hexdigit(x);
-#endif
-	}
-
-	uint8_t val = SPDR;
-
-#ifdef CONFIG_SPI_DEBUG
-	bits[i++] = ' ';
-	bits[i++] = hexdigit(c >> 4);
-	bits[i++] = hexdigit(c >> 0);
-	bits[i++] = ' ';
-	bits[i++] = hexdigit(val >> 4);
-	bits[i++] = hexdigit(val >> 0);
-	bits[i++] = '\r';
-	bits[i++] = '\n';
-	usb_serial_write(bits, i);
-#endif
-	return val;
-#else
-	// shift out and into one register
-	uint8_t val = c;
-	for (int i = 0 ; i < 8 ; i++)
-	{
-		out(SPI_MOSI, val & 0x80);
-		val <<= 1;
-		asm("nop");
-		asm("nop");
-		asm("nop");
-
-		out(SPI_SCLK, 1);
-
-		asm("nop");
-		asm("nop");
-		asm("nop");
-
-		if (in(SPI_MISO))
-			val |= 1;
-
-		out(SPI_SCLK, 0);
-	}
-
-	out(SPI_MOSI, 0); // return to zero
-#endif
-
-	bits[i++] = hexdigit(c >> 4);
-	bits[i++] = hexdigit(c >> 0);
-	bits[i++] = '-';
-	bits[i++] = hexdigit(val >> 4);
-	bits[i++] = hexdigit(val >> 0);
-	bits[i++] = '\r';
-	bits[i++] = '\n';
-	usb_serial_write(bits, i);
-
-	return val;
-}
-
-
-static void
-spi_passthrough(void)
-{
-	int c = usb_serial_getchar_echo();
-
-	SPDR = c;
-	while (bit_is_clear(SPSR, SPIF))
-		;
-	uint8_t val = SPDR;
-
-	char buf[2];
-	buf[0] = hexdigit(val >> 4);
-	buf[1] = hexdigit(val >> 0);
-	usb_serial_write(buf, 2);
+	return SPI.transfer(c);
 }
 
 
@@ -223,11 +134,10 @@ spi_passthrough(void)
 static void
 spi_rdid(void)
 {
-	spi_power(1);
-	//_delay_ms(2);
+	//delay(2);
 
 	spi_cs(1);
-	_delay_us(100);
+	delayMicroseconds(100);
 
 #if 0
 	// RES -- read electronic id
@@ -252,8 +162,7 @@ spi_rdid(void)
 #endif
 
 	spi_cs(0);
-	_delay_ms(1);
-	spi_power(0);
+	delay(1);
 
 	char buf[16];
 	uint8_t off = 0;
@@ -268,8 +177,9 @@ spi_rdid(void)
 	buf[off++] = '\r';
 	buf[off++] = '\n';
 
-	usb_serial_write(buf, off);
+	Serial.print(buf);
 }
+
 
 static uint8_t
 spi_status(void)
@@ -311,8 +221,7 @@ usb_serial_readhex(void)
 static void
 spi_write_enable(void)
 {
-	spi_power(1);
-	_delay_ms(2);
+	delay(2);
 
 	uint8_t r1 = spi_status();
 
@@ -338,7 +247,8 @@ spi_write_enable_interactive(void)
 
 	buf[off++] = '\r';
 	buf[off++] = '\n';
-	usb_serial_write(buf, off);
+	buf[off++] = '\0';
+	Serial.print(buf);
 }
 
 
@@ -367,7 +277,7 @@ spi_erase_sector_interactive(void)
 
 	if ((spi_status() & SPI_WEL) == 0)
 	{
-		send_str(PSTR("wp!\r\n"));
+		Serial.print("wp!\r\n");
 		return;
 	}
 
@@ -384,8 +294,9 @@ spi_erase_sector_interactive(void)
 	buf[off++] = hexdigit(addr >>  0);
 	buf[off++] = '\r';
 	buf[off++] = '\n';
+	buf[off++] = '\0';
 
-	usb_serial_write(buf, off);
+	Serial.print(buf);
 }
 	
 
@@ -395,11 +306,10 @@ spi_read(void)
 {
 	uint32_t addr = usb_serial_readhex();
 
-	spi_power(1);
-	_delay_ms(2);
+	delay(2);
 
 	spi_cs(1);
-	//_delay_ms(1);
+	//delay(1);
 
 	// read a page
 	spi_send(0x03);
@@ -413,7 +323,6 @@ spi_read(void)
 		data[i] = spi_send(0);
 
 	spi_cs(0);
-	spi_power(0);
 
 	char buf[16*3+2];
 	uint8_t off = 0;
@@ -425,8 +334,9 @@ spi_read(void)
 	}
 	buf[off++] = '\r';
 	buf[off++] = '\n';
+	buf[off++] = '\0';
 
-	usb_serial_write(buf, off);
+	Serial.print(buf);
 }
 
 
@@ -436,8 +346,7 @@ spi_dump(void)
 {
 	const uint32_t end_addr = 8L << 20;
 
-	spi_power(1);
-	_delay_ms(1);
+	delay(1);
 
 	uint32_t addr = 0;
 	uint8_t buf[64];
@@ -455,14 +364,13 @@ spi_dump(void)
 
 		spi_cs(0);
 
-		usb_serial_write(buf, sizeof(buf));
+		Serial.write(buf, sizeof(buf));
 
 		addr += sizeof(buf);
 		if (addr >= end_addr)
 			break;
 	}
 
-	spi_power(0);
 }
 
 static void
@@ -476,8 +384,7 @@ prom_send(void)
 	//const uint32_t end_addr = 8L << 20;
 	const uint32_t end_addr = 8L << 20;
 
-	spi_power(1);
-	_delay_ms(1);
+	delay(1);
 
 	uint32_t addr = 0;
 
@@ -502,7 +409,6 @@ prom_send(void)
 			break;
 	}
 
-	spi_power(0);
 
 	xmodem_fini(&xmodem_block);
 }
@@ -538,8 +444,9 @@ spi_upload(void)
 	outbuf[off++] = hexdigit(len >>  0);
 	outbuf[off++] = '\r';
 	outbuf[off++] = '\n';
+	outbuf[off++] = '\0';
 
-	usb_serial_write(outbuf, off);
+	Serial.print(outbuf);
 	if (fail)
 		return;
 
@@ -554,7 +461,7 @@ spi_upload(void)
 		for (uint8_t i = 0 ; i < chunk_size; i++)
 		{
 			int c;
-			while ((c = usb_serial_getchar()) == -1)
+			while ((c = Serial.read()) == -1)
 				;
 			buf[i] = c;
 		}
@@ -574,7 +481,8 @@ spi_upload(void)
 			outbuf[off++] = hexdigit(addr >>  0);
 			outbuf[off++] = '\r';
 			outbuf[off++] = '\n';
-			usb_serial_write(outbuf, off);
+			outbuf[off++] = '\0';
+			Serial.print(outbuf);
 		}
 			
 
@@ -600,86 +508,21 @@ spi_upload(void)
 		addr += chunk_size;
 	}
 
-	send_str(PSTR("done!\r\n"));
+	Serial.print("done!\r\n");
 }
 
 
 int main(void)
 {
-	// set for 8 MHz clock since we are running at 3.3 V
-#define CPU_PRESCALE(n) (CLKPR = 0x80, CLKPR = (n))
-	CPU_PRESCALE(1);
+	Serial.print("spi\r\n");
 
-	// Disable the ADC
-	ADMUX = 0;
-
-	// initialize the USB, and then wait for the host
-	// to set configuration.  If the Teensy is powered
-	// without a PC connected to the USB port, this 
-	// will wait forever.
-	usb_init();
-	while (!usb_configured())
-		continue;
-
-	// turn on led
-	ddr(0xD6, 1);
-	out(0xD6, 1);
-
-	_delay_ms(500);
-
-	// wait for the user to run their terminal emulator program
-	// which sets DTR to indicate it is ready to receive.
-	while (!(usb_serial_get_control() & USB_SERIAL_DTR))
-		continue;
-
-	// discard anything that was received prior.  Sometimes the
-	// operating system or other software will send a modem
-	// "AT command", which can still be buffered.
-	usb_serial_flush_input();
-
-	// Make sure that everything is tri-stated
-	ddr(SPI_MISO, 0);
-	ddr(SPI_MOSI, 1);
-	ddr(SPI_SCLK, 1);
-	ddr(SPI_SS, 1);
-	//ddr(SPI_POW, 1); // do not enable power pin for now
-
-	// No pull ups enabled
-	out(SPI_MISO, 0);
-
-	// just to be sure that MISO is configured correctly
-	cbi(PORTB, 3); // no pull up
-	cbi(DDRB, 3);
-
-	// keep it off and unselected
-	spi_power(0);
-	spi_cs(0);
-
-	send_str(PSTR("spi\r\n"));
-
-#ifdef CONFIG_SPI_HW
-	// Enable SPI in master mode, clock/16 == 500 KHz
-	// Clocked on falling edge (CPOL=0, CPHA=1, PIC terms == CKP=0, CKE=1)
-	SPCR = 0
-		| (1 << SPE)
-		| (1 << MSTR)
-		| (0 << SPR1)
-		| (0 << SPR0)
-		| (0 << CPOL)
-		| (0 << CPHA)
-		;
-
-	// Wait for any transactions to complete (shouldn't happen)
-	if (bit_is_set(SPCR, SPIF))
-		(void) SPDR;
-#endif
 
 	while (1)
 	{
 		usb_serial_putchar('>');
 
 		int c;
-		while ((c = usb_serial_getchar()) == -1)
+		while ((c = Serial.read()) == -1)
 			;
 
 		switch(c)
@@ -692,14 +535,8 @@ int main(void)
 		case 'u': spi_upload(); break;
 		case XMODEM_NAK:
 			prom_send();
-			send_str(PSTR("xmodem done\r\n"));
+			Serial.print("xmodem done\r\n");
 			break;
-		case 'x': {
-			uint8_t x = DDRB;
-			usb_serial_putchar(hexdigit(x >> 4));
-			usb_serial_putchar(hexdigit(x >> 0));
-			break;
-		}
 		default:
 			usb_serial_putchar('?');
 			break;
