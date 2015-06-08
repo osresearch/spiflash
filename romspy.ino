@@ -84,6 +84,7 @@ setup()
 #endif
 }
 
+
 static int
 usb_serial_getchar_echo()
 {
@@ -94,7 +95,7 @@ usb_serial_getchar_echo()
 			continue;
 
 		// echo back to the serial port
-		Serial.print(c);
+		Serial.print((char) c);
 		if (c == '\r')
 			Serial.print('\n');
 
@@ -102,8 +103,6 @@ usb_serial_getchar_echo()
 	}
 }
 
-
-#define CONFIG_SPI_HW
 
 static xmodem_block_t xmodem_block;
 
@@ -224,6 +223,7 @@ spi_write_enable(void)
 	delay(2);
 
 	uint8_t r1 = spi_status();
+	(void) r1; // unused
 
 	spi_cs(1);
 	spi_send(SPI_WRITE_ENABLE);
@@ -324,7 +324,7 @@ spi_read(void)
 
 	spi_cs(0);
 
-	char buf[16*3+2];
+	char buf[16*3+3];
 	uint8_t off = 0;
 	for (int i = 0 ; i < 16 ; i++)
 	{
@@ -488,6 +488,7 @@ spi_upload(void)
 
 		spi_write_enable();
 		uint8_t r2 = spi_status();
+		(void) r2; // unused
 
 		spi_cs(1);
 		spi_send(0x02);
@@ -511,36 +512,43 @@ spi_upload(void)
 	Serial.print("done!\r\n");
 }
 
+static const char usage[] =
+"Commands:\r\n"
+" i           Read RDID from the flash chip\r\n"
+" rADDR       Read 16 bytes from address\r\n"
+" R           SPI dump\r\n"
+" w           Enable writes (interactive)\r\n"
+" eADDR       Erase a sector\r\n"
+" uADDR LEN   Upload new code for a section of the ROM\r\n"
+"\r\n"
+"To read the entire ROM, start an x-modem transfer.\r\n"
+"\r\n";
 
-int main(void)
+void
+loop()
 {
-	Serial.print("spi\r\n");
+	int c;
+	if ((c = Serial.read()) == -1)
+		return;
 
-
-	while (1)
+	switch(c)
 	{
-		usb_serial_putchar('>');
-
-		int c;
-		while ((c = Serial.read()) == -1)
-			;
-
-		switch(c)
-		{
-		case 'i': spi_rdid(); break;
-		case 'r': spi_read(); break;
-		case 'R': spi_dump(); break;
-		case 'w': spi_write_enable_interactive(); break;
-		case 'e': spi_erase_sector_interactive(); break;
-		case 'u': spi_upload(); break;
-		case XMODEM_NAK:
-			prom_send();
-			Serial.print("xmodem done\r\n");
-			break;
-		default:
-			usb_serial_putchar('?');
-			break;
-		}
+	case 'i': spi_rdid(); break;
+	case 'r': spi_read(); break;
+	case 'R': spi_dump(); break;
+	case 'w': spi_write_enable_interactive(); break;
+	case 'e': spi_erase_sector_interactive(); break;
+	case 'u': spi_upload(); break;
+	case XMODEM_NAK:
+		prom_send();
+		Serial.print("xmodem done\r\n");
+		break;
+	case '?': Serial.print(usage);
+		break;
+	default:
+		usb_serial_putchar('?');
+		break;
 	}
 
+	usb_serial_putchar('>');
 }
