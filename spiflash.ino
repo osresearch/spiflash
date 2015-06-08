@@ -1,7 +1,12 @@
 /**
  * \file SPI Flash reader for the Teensy 3.
  *
- * Very fast reader for SPI flashes.
+ * Fast reader for SPI flashes, using the native SPI hardware of the Teensy 3.
+ * Build this with the Teensyduino environment and flash it to the
+ * microcontroller.
+ *
+ * An 8-pin SOIC chip clip makes it easy to attach to the motherboard ROM.
+ * Be sure to disconnect the laptop battery before powering up the Teensy!
  *
  * Black = ground
  * Red = 3.3 V
@@ -45,9 +50,9 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #include <SPI.h>
 #include "xmodem.h"
 
-#define SPI_CS   10 // white
+#define SPI_CS   10 // white or yellow
 #define SPI_SCLK 13 // green
-#define SPI_MOSI 11 // blue
+#define SPI_MOSI 11 // blue or purple
 #define SPI_MISO 12 // brown
 
 #define SPI_PAGE_SIZE	4096
@@ -67,22 +72,9 @@ setup()
 	Serial.begin(115200);
 	SPI.begin();
 	
-	// keep it off and unselected
+	// keep the SPI flash unselected until we talk to it
 	pinMode(SPI_CS, OUTPUT);
 	spi_cs(0);
-
-#ifdef CONFIG_SPI_HW
-	// Enable SPI in master mode, clock/16 == 500 KHz
-	// Clocked on falling edge (CPOL=0, CPHA=1, PIC terms == CKP=0, CKE=1)
-	SPCR = 0
-		| (1 << SPE)
-		| (1 << MSTR)
-		| (0 << SPR1)
-		| (0 << SPR0)
-		| (0 << CPOL)
-		| (0 << CPHA)
-		;
-#endif
 }
 
 
