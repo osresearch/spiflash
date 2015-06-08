@@ -302,10 +302,10 @@ spi_erase_sector_interactive(void)
 
 
 static void
-spi_read(void)
+spi_read(
+	uint32_t addr
+)
 {
-	uint32_t addr = usb_serial_readhex();
-
 	delay(2);
 
 	spi_cs(1);
@@ -324,8 +324,19 @@ spi_read(void)
 
 	spi_cs(0);
 
-	char buf[16*3+3];
+	char buf[16*3+8+2+3];
 	uint8_t off = 0;
+	buf[off++] = hexdigit(addr >> 28);
+	buf[off++] = hexdigit(addr >> 24);
+	buf[off++] = hexdigit(addr >> 20);
+	buf[off++] = hexdigit(addr >> 16);
+	buf[off++] = hexdigit(addr >> 12);
+	buf[off++] = hexdigit(addr >>  8);
+	buf[off++] = hexdigit(addr >>  4);
+	buf[off++] = hexdigit(addr >>  0);
+	buf[off++] = ':';
+	buf[off++] = ' ';
+
 	for (int i = 0 ; i < 16 ; i++)
 	{
 		buf[off++] = hexdigit(data[i] >> 4);
@@ -516,6 +527,7 @@ static const char usage[] =
 "Commands:\r\n"
 " i           Read RDID from the flash chip\r\n"
 " rADDR       Read 16 bytes from address\r\n"
+" .           Read the next 16 bytes\r\n"
 " R           SPI dump\r\n"
 " w           Enable writes (interactive)\r\n"
 " eADDR       Erase a sector\r\n"
@@ -523,6 +535,8 @@ static const char usage[] =
 "\r\n"
 "To read the entire ROM, start an x-modem transfer.\r\n"
 "\r\n";
+
+static uint32_t addr;
 
 void
 loop()
@@ -534,7 +548,16 @@ loop()
 	switch(c)
 	{
 	case 'i': spi_rdid(); break;
-	case 'r': spi_read(); break;
+	case 'r':
+		addr = usb_serial_readhex();
+		spi_read(addr);
+		break;
+
+	case '.':
+		// read the next 16 bytes
+		spi_read(addr += 16);
+		break;
+
 	case 'R': spi_dump(); break;
 	case 'w': spi_write_enable_interactive(); break;
 	case 'e': spi_erase_sector_interactive(); break;
