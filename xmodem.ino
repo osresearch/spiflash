@@ -4,13 +4,6 @@
  * Using USB serial
  */
 
-#include <avr/io.h>
-#include <avr/pgmspace.h>
-#include <avr/interrupt.h>
-#include <stdint.h>
-#include <string.h>
-#include <util/delay.h>
-#include "usb_serial.h"
 #include "xmodem.h"
 
 
@@ -42,11 +35,14 @@ xmodem_send(
 
 	while (retry_count++ < 10)
 	{
-		usb_serial_write((void*) block, sizeof(*block));
+		Serial.write((const uint8_t*) block, sizeof(*block));
 		// Wait for an ACK (done), CAN (abort) or NAK (retry)
 		while (1)
 		{
-			uint8_t c = usb_serial_getchar();
+			const int c = Serial.read();
+			if (c == -1)
+				continue;
+
 			if (c == XMODEM_ACK)
 				return 0;
 			if (c == XMODEM_CAN)
@@ -79,7 +75,10 @@ xmodem_init(
 	// wait for initial nak
 	while (1)
 	{
-		uint8_t c = usb_serial_getchar();
+		const int c = Serial.read();
+		if (c == -1)
+			continue;
+
 		if (c == XMODEM_NAK)
 			return 0;
 		if (c == XMODEM_CAN)
@@ -105,11 +104,11 @@ xmodem_fini(
 	// wait for an ACK or CAN
 	while (1)
 	{
-		usb_serial_putchar(XMODEM_EOT);
+		Serial.print((char) XMODEM_EOT);
 
 		while (1)
 		{
-			uint16_t c = usb_serial_getchar();
+			const int c = Serial.read();
 			if (c == -1)
 				continue;
 			if (c == XMODEM_ACK)
