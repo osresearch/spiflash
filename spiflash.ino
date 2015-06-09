@@ -299,7 +299,7 @@ spi_read(
 	uint32_t addr
 )
 {
-	delay(2);
+	//delay(2);
 
 	spi_cs(1);
 	//delay(1);
@@ -385,10 +385,9 @@ prom_send(void)
 	if (xmodem_init(&xmodem_block, 1) < 0)
 		return;
 
-	//const uint32_t end_addr = 8L << 20;
 	const uint32_t end_addr = 8L << 20;
 
-	delay(1);
+	//delay(1);
 
 	uint32_t addr = 0;
 
