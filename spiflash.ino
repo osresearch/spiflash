@@ -50,14 +50,24 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #include <SPI.h>
 #include "xmodem.h"
 
+#if 0
+// teensy 3 pins
 #define SPI_CS   10 // white or yellow
 #define SPI_SCLK 13 // green
 #define SPI_MOSI 11 // blue or purple
 #define SPI_MISO 12 // brown
+#else
+// teensy 2 pins
+#define SPI_CS   0 // white or yellow
+#define SPI_SCLK 1 // green
+#define SPI_MOSI 3 // blue or purple
+#define SPI_MISO 4 // brown
+#endif
 
 #define SPI_PAGE_SIZE	4096
 #define SPI_PAGE_MASK	(SPI_PAGE_SIZE - 1)
 
+static unsigned long chip_size; // in MB
 
 static inline void
 spi_cs(int i)
@@ -75,6 +85,8 @@ setup()
 	// keep the SPI flash unselected until we talk to it
 	pinMode(SPI_CS, OUTPUT);
 	spi_cs(0);
+
+	chip_size = 8;
 }
 
 
@@ -168,6 +180,7 @@ spi_rdid(void)
 	buf[off++] = hexdigit(b4 >> 0);
 	buf[off++] = '\r';
 	buf[off++] = '\n';
+	buf[off++] = '\0';
 
 	Serial.print(buf);
 }
@@ -348,7 +361,7 @@ spi_read(
 static void
 spi_dump(void)
 {
-	const uint32_t end_addr = 8L << 20;
+	const uint32_t end_addr = chip_size << 20;
 
 	delay(1);
 
@@ -508,7 +521,7 @@ spi_upload(void)
 		while (spi_status() & SPI_WIP)
 			;
 
-		//usb_serial_putchar('.');
+		//Serial.print(".");
 		addr += chunk_size;
 	}
 
@@ -524,6 +537,7 @@ static const char usage[] =
 " w           Enable writes (interactive)\r\n"
 " eADDR       Erase a sector\r\n"
 " uADDR LEN   Upload new code for a section of the ROM\r\n"
+" sNN         Chip size in MB (in hex)"
 "\r\n"
 "To read the entire ROM, start an x-modem transfer.\r\n"
 "\r\n";
@@ -545,6 +559,10 @@ loop()
 		spi_read(addr);
 		break;
 
+	case 's':
+		chip_size = usb_serial_readhex();
+		break;
+
 	case '.':
 		// read the next 16 bytes
 		spi_read(addr += 16);
@@ -561,9 +579,9 @@ loop()
 	case '?': Serial.print(usage);
 		break;
 	default:
-		usb_serial_putchar('?');
+		Serial.print("?");
 		break;
 	}
 
-	usb_serial_putchar('>');
+	Serial.print(">");
 }
