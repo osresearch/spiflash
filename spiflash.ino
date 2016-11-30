@@ -398,7 +398,7 @@ prom_send(void)
 	if (xmodem_init(&xmodem_block, 1) < 0)
 		return;
 
-	const uint32_t end_addr = 8L << 20;
+	const uint32_t end_addr = chip_size << 20;
 
 	//delay(1);
 
