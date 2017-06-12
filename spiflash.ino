@@ -50,7 +50,7 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #include <SPI.h>
 #include "xmodem.h"
 
-#if 0
+#if 1
 // teensy 3 pins
 #define SPI_CS   10 // white or yellow
 #define SPI_SCLK 13 // green
@@ -69,9 +69,17 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 
 static unsigned long chip_size; // in MB
 
+// 40 MHz for teensy 3
+static SPISettings spi_settings(40000000, MSBFIRST, SPI_MODE0);
+
 static inline void
 spi_cs(int i)
 {
+	if (i)
+		SPI.beginTransaction(spi_settings);
+	else
+		SPI.endTransaction();
+
 	digitalWrite(SPI_CS, !i);
 }
 
@@ -468,6 +476,7 @@ spi_upload(void)
 
 
 	uint32_t offset = 0;
+#if 0
 	const size_t chunk_size = sizeof(xmodem_block.data);
 	uint8_t * const buf = xmodem_block.data;
 
@@ -525,7 +534,124 @@ spi_upload(void)
 		addr += chunk_size;
 	}
 
-	Serial.print("done!\r\n");
+	Serial.print("\r\ndone!\r\n");
+#else
+	// read an entire page, then compare it to what is in the ROM
+	const size_t chunk_size = SPI_PAGE_SIZE;
+	uint8_t buf[SPI_PAGE_SIZE];
+	int empty_count = 0;
+	int match_count = 0;
+	int write_count = 0;
+
+	for (offset = 0 ; offset < len ; offset += chunk_size, addr += chunk_size)
+	{
+		// print the address every 256 KB
+		if ((addr & ((64 * SPI_PAGE_SIZE) - 1)) == 0)
+		{
+			off = 0;
+			outbuf[off++] = '\r';
+			outbuf[off++] = '\n';
+			outbuf[off++] = hexdigit(addr >> 20);
+			outbuf[off++] = hexdigit(addr >> 16);
+			outbuf[off++] = hexdigit(addr >> 12);
+			outbuf[off++] = hexdigit(addr >>  8);
+			outbuf[off++] = hexdigit(addr >>  4);
+			outbuf[off++] = hexdigit(addr >>  0);
+			outbuf[off++] = ':';
+			outbuf[off++] = ' ';
+			outbuf[off++] = '\0';
+			Serial.print(outbuf);
+			Serial.flush();
+		}
+			
+		// read a chunk of data from the serial port
+		// keeping track if this is an empty page (all 0xff)
+		bool all_ff = true;
+		for (uint16_t i = 0 ; i < chunk_size; i++)
+		{
+			int c;
+			while ((c = Serial.read()) == -1)
+				;
+			buf[i] = c;
+			if (c != 0xff)
+				all_ff = false;
+		}
+
+		// read the flash and compare it to the buffer
+		bool matched = true;
+		spi_cs(1);
+		spi_send(0x03); // read
+		spi_send(addr >> 16);
+		spi_send(addr >>  8);
+		spi_send(addr >>  0);
+		for (uint16_t i = 0 ; i < chunk_size; i++)
+		{
+			uint8_t rom = spi_send(0);
+
+			if (buf[i] == rom)
+				continue;
+
+			matched = false;
+			break;
+		}
+		spi_cs(0);
+
+		if (matched)
+		{
+			// everything mached, no need to touch this page
+			Serial.print('.');
+			match_count++;
+			continue;
+		} else
+		if (all_ff)
+		{
+			Serial.print('e');
+			empty_count++;
+		} else {
+			Serial.print('w');
+			write_count++;
+		}
+
+		// there was a mismatch. erase the page and write it
+		spi_write_enable();
+		spi_erase_sector(addr);
+
+		// if the source was all 0xff, we do not need to write
+		// after the erase has completed
+		if (all_ff)
+			continue;
+
+		// write the 4K page in 256 byte chunks
+		for (uint16_t i = 0 ; i < chunk_size ; i += 256)
+		{
+			spi_write_enable();
+			uint8_t r2 = spi_status();
+			(void) r2; // unused
+
+			spi_cs(1);
+			spi_send(0x02); // write
+			spi_send((addr+i) >> 16);
+			spi_send((addr+i) >>  8);
+			spi_send((addr+i) >>  0);
+			
+			for (uint16_t j = 0 ; j < 256 ; j++)
+				spi_send(buf[i+j]);
+
+			spi_cs(0);
+
+			// wait for write to finish
+			while (spi_status() & SPI_WIP)
+				;
+		}
+	}
+
+	Serial.print("\r\nmatch: ");
+	Serial.print(match_count);
+	Serial.print(" empty: ");
+	Serial.print(empty_count);
+	Serial.print(" write: ");
+	Serial.println(write_count);
+#endif
 }
 
 static const char usage[] =
