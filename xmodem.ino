@@ -36,6 +36,7 @@ xmodem_send(
 	while (retry_count++ < 10)
 	{
 		Serial.write((const uint8_t*) block, sizeof(*block));
+		Serial.send_now();
 		// Wait for an ACK (done), CAN (abort) or NAK (retry)
 		while (1)
 		{
