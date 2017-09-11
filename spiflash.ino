@@ -67,6 +67,23 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #define SPI_PAGE_SIZE	4096
 #define SPI_PAGE_MASK	(SPI_PAGE_SIZE - 1)
 
+// Flash commands
+#define SPI_CMD_WREN		0x06 // Write Enable
+#define SPI_CMD_RDID		0x9F // Read ID
+#define SPI_CMD_RDSR		0x05 // Read status register
+#define SPI_CMD_WRSR		0x01 // Write status register
+#define SPI_CMD_READ		0x03 // Read data bytes
+#define SPI_CMD_FAST_READ	0x0B // Read at higher speed
+#define SPI_CMD_SE		0x20 // Sector erase
+#define SPI_CMD_PP		0x02 // Page Program
+
+
+// Status Register bits
+#define SPI_SRWD		0x80 // Status Register Write Disable
+#define SPI_WIP			0x01 // Write in Progress
+#define SPI_WEL			0x02 // Write Enable
+
+
 static unsigned long chip_size; // in MB
 
 // 40 MHz for teensy 3
@@ -163,7 +180,7 @@ spi_rdid(void)
 	uint8_t b4 = 0;
 #else
 	// JEDEC RDID: 1 byte out, three bytes back
-	spi_send(0x9F);
+	spi_send(SPI_CMD_RDID);
 
 	// read 3 bytes back
 	uint8_t b1 = spi_send(0x01);
@@ -194,14 +211,43 @@ spi_rdid(void)
 }
 
 
+/** Read the status register (RDSR) */
 static uint8_t
 spi_status(void)
 {
 	spi_cs(1);
-	spi_send(0x05);
+	spi_send(SPI_CMD_RDSR); // RDSR
 	uint8_t r1 = spi_send(0x00);
 	spi_cs(0);
 	return r1;
+}
+
+
+static void
+spi_status_interactive(void)
+{
+	// read the status register
+	uint8_t sr = spi_status();
+	char buf[16];
+	uint8_t off = 0;
+	buf[off++] = hexdigit(sr >> 4);
+	buf[off++] = hexdigit(sr >> 0);
+	buf[off++] = '\0';
+	Serial.println(buf);
+}
+
+
+static void
+spi_write_status(uint8_t sr)
+{
+	spi_cs(1);
+	spi_send(SPI_CMD_WREN);
+	spi_cs(0);
+	delay(1);
+	spi_cs(1);
+	spi_send(SPI_CMD_WRSR);
+	spi_send(sr);
+	spi_cs(0);
 }
 
 
@@ -227,10 +273,7 @@ usb_serial_readhex(void)
 }
 
 
-#define SPI_WIP 1
-#define SPI_WEL 2
-#define SPI_WRITE_ENABLE 0x06
-
+/** Set the Write Enable (WEL) bit in the status register */
 static void
 spi_write_enable(void)
 {
@@ -240,7 +283,7 @@ spi_write_enable(void)
 	(void) r1; // unused
 
 	spi_cs(1);
-	spi_send(SPI_WRITE_ENABLE);
+	spi_send(SPI_CMD_WREN);
 	spi_cs(0);
 }
 
@@ -273,7 +316,7 @@ spi_erase_sector(
 )
 {
 	spi_cs(1);
-	spi_send(0x20);
+	spi_send(SPI_CMD_SE);
 	spi_send(addr >> 16);
 	spi_send(addr >>  8);
 	spi_send(addr >>  0);
@@ -326,7 +369,7 @@ spi_read(
 	//delay(1);
 
 	// read a page
-	spi_send(0x03);
+	spi_send(SPI_CMD_READ);
 	spi_send(addr >> 16);
 	spi_send(addr >>  8);
 	spi_send(addr >>  0);
@@ -379,7 +422,7 @@ spi_dump(void)
 	while (1)
 	{
 		spi_cs(1);
-		spi_send(0x03); // read
+		spi_send(SPI_CMD_READ); // read
 		spi_send(addr >> 16);
 		spi_send(addr >>  8);
 		spi_send(addr >>  0);
@@ -415,7 +458,7 @@ prom_send(void)
 	while (1)
 	{
 		spi_cs(1);
-		spi_send(0x03); // read
+		spi_send(SPI_CMD_READ); // read
 		spi_send(addr >> 16);
 		spi_send(addr >>  8);
 		spi_send(addr >>  0);
@@ -580,7 +623,7 @@ spi_upload(void)
 		// read the flash and compare it to the buffer
 		bool matched = true;
 		spi_cs(1);
-		spi_send(0x03); // read
+		spi_send(SPI_CMD_READ); // read
 		spi_send(addr >> 16);
 		spi_send(addr >>  8);
 		spi_send(addr >>  0);
@@ -629,7 +672,7 @@ spi_upload(void)
 			(void) r2; // unused
 
 			spi_cs(1);
-			spi_send(0x02); // write
+			spi_send(SPI_CMD_PP); // write
 			spi_send((addr+i) >> 16);
 			spi_send((addr+i) >>  8);
 			spi_send((addr+i) >>  0);
@@ -663,7 +706,10 @@ static const char usage[] =
 " w           Enable writes (interactive)\r\n"
 " eADDR       Erase a sector\r\n"
 " uADDR LEN   Upload new code for a section of the ROM\r\n"
-" sNN         Chip size in MB (in hex)"
+" sNN         Chip size in MB (in hex)\r\n"
+" x           Read the status register\r\n"
+" Xsr         Write SR to the status register (dangerous!)\r\n"
+" g           Read security resgister\r\n"
 "\r\n"
 "To read the entire ROM, start an x-modem transfer.\r\n"
 "\r\n";
@@ -693,6 +739,20 @@ loop()
 		// read the next 16 bytes
 		spi_read(addr += 16);
 		break;
+
+	case 'x':
+		// read the status register
+		spi_status_interactive();
+		break;
+
+	case 'X':
+	{
+		// set the status register; WEL must be set first
+		uint8_t sr = usb_serial_readhex();
+		spi_write_status(sr);
+		spi_status_interactive();
+		break;
+	}
 
 	case 'R': spi_dump(); break;
 	case 'w': spi_write_enable_interactive(); break;
