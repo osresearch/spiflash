@@ -49,6 +49,7 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
  */
 #include <SPI.h>
 #include "xmodem.h"
+#include "SketchSaver/SketchSaver.h"
 
 #if 1
 // teensy 3 pins
@@ -87,15 +88,21 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 static unsigned long chip_size; // in MB
 
 // 40 MHz for teensy 3
-static SPISettings spi_settings(40000000, MSBFIRST, SPI_MODE0);
+static SPISettings spi_settings(20000000, MSBFIRST, SPI_MODE0);
 
 static inline void
 spi_cs(int i)
 {
+	// switch out of tristate mode, if we're in it
+
 	if (i)
+	{
+		pinMode(SPI_CS, OUTPUT);
+		SPI.begin();
 		SPI.beginTransaction(spi_settings);
-	else
+	} else {
 		SPI.endTransaction();
+	}
 
 	digitalWrite(SPI_CS, !i);
 }
@@ -708,7 +715,7 @@ static const char usage[] =
 " uADDR LEN   Upload new code for a section of the ROM\r\n"
 " sNN         Chip size in MB (in hex)\r\n"
 " x           Read the status register\r\n"
-" Xsr         Write SR to the status register (dangerous!)\r\n"
+" t           Tri-state the pins to release the bus\r\n"
 " g           Read security resgister\r\n"
 "\r\n"
 "To read the entire ROM, start an x-modem transfer.\r\n"
@@ -753,6 +760,17 @@ loop()
 		spi_status_interactive();
 		break;
 	}
+
+	case 'S':
+		sketch_output();
+		break;
+
+	case 't':
+		pinMode(SPI_CS, INPUT);
+		digitalWrite(SPI_CS, 0);
+		SPI.end();
+		Serial.println("TRISTATE");
+		break;
 
 	case 'R': spi_dump(); break;
 	case 'w': spi_write_enable_interactive(); break;
