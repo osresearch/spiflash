@@ -79,7 +79,7 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #define SPI_CMD_SE		0x20 // Sector erase
 #define SPI_CMD_SE4		0x21 // Sector erase with 4-byte address
 #define SPI_CMD_PP		0x02 // Page Program (write to flash)
-#define SPI_CMD_PP4		0x02 // Page Program with 4-byte address
+#define SPI_CMD_PP4		0x12 // Page Program with 4-byte address
 #define SPI_CMD_BRRD		0x16 // Read bank address register
 #define SPI_CMD_BRWR		0x17 // Write bank address register
 
