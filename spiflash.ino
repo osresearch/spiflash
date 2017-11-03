@@ -74,9 +74,14 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 #define SPI_CMD_RDSR		0x05 // Read status register
 #define SPI_CMD_WRSR		0x01 // Write status register
 #define SPI_CMD_READ		0x03 // Read data bytes
+#define SPI_CMD_READ4		0x13 // Read data bytes with 4-byte address
 #define SPI_CMD_FAST_READ	0x0B // Read at higher speed
 #define SPI_CMD_SE		0x20 // Sector erase
-#define SPI_CMD_PP		0x02 // Page Program
+#define SPI_CMD_SE4		0x21 // Sector erase with 4-byte address
+#define SPI_CMD_PP		0x02 // Page Program (write to flash)
+#define SPI_CMD_PP4		0x02 // Page Program with 4-byte address
+#define SPI_CMD_BRRD		0x16 // Read bank address register
+#define SPI_CMD_BRWR		0x17 // Write bank address register
 
 
 // Status Register bits
@@ -88,7 +93,7 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
 static unsigned long chip_size; // in MB
 
 // 40 MHz for teensy 3
-static SPISettings spi_settings(20000000, MSBFIRST, SPI_MODE0);
+static SPISettings spi_settings(10000000, MSBFIRST, SPI_MODE0);
 
 static inline void
 spi_cs(int i)
@@ -106,6 +111,8 @@ spi_cs(int i)
 
 	digitalWrite(SPI_CS, !i);
 }
+
+
 
 
 void
@@ -163,6 +170,54 @@ spi_send(
 )
 {
 	return SPI.transfer(c);
+}
+
+
+// Select a 4-byte or 3-byte address for the read command
+static void
+spi_choose(
+	uint32_t addr,
+	uint8_t cmd3,
+	uint8_t cmd4
+)
+{
+	if ((addr >> 24) != 0x00)
+	{
+		spi_send(cmd4);
+		spi_send(addr >> 24);
+	} else {
+		spi_send(cmd3);
+	}
+
+	spi_send(addr >> 16);
+	spi_send(addr >>  8);
+	spi_send(addr >>  0);
+}
+
+
+static void
+spi_read_command(
+	uint32_t addr
+)
+{
+	spi_choose(addr, SPI_CMD_READ, SPI_CMD_READ4);
+}
+
+
+static void
+spi_write_command(
+	uint32_t addr
+)
+{
+	spi_choose(addr, SPI_CMD_PP, SPI_CMD_PP4);
+}
+
+static void
+spi_erase_command(
+	uint32_t addr
+)
+{
+	spi_choose(addr, SPI_CMD_SE, SPI_CMD_SE4);
 }
 
 
@@ -258,6 +313,24 @@ spi_write_status(uint8_t sr)
 }
 
 
+static void
+spi_bank_address_register_interactive(void)
+{
+	spi_cs(1);
+	spi_send(SPI_CMD_BRRD);
+	uint8_t brac = spi_send(0x00);
+	brac = spi_send(0x00);
+	spi_cs(0);
+
+	char buf[16];
+	uint8_t off = 0;
+	buf[off++] = hexdigit(brac >> 4);
+	buf[off++] = hexdigit(brac >> 4);
+	buf[off++] = '\0';
+	Serial.println(buf);
+}
+		
+
 static uint32_t
 usb_serial_readhex(void)
 {
@@ -323,10 +396,7 @@ spi_erase_sector(
 )
 {
 	spi_cs(1);
-	spi_send(SPI_CMD_SE);
-	spi_send(addr >> 16);
-	spi_send(addr >>  8);
-	spi_send(addr >>  0);
+	spi_erase_command(addr);
 	spi_cs(0);
 
 	while (spi_status() & SPI_WIP)
@@ -350,6 +420,8 @@ spi_erase_sector_interactive(void)
 	char buf[16];
 	uint8_t off = 0;
 	buf[off++] = 'E';
+	buf[off++] = hexdigit(addr >> 28);
+	buf[off++] = hexdigit(addr >> 24);
 	buf[off++] = hexdigit(addr >> 20);
 	buf[off++] = hexdigit(addr >> 16);
 	buf[off++] = hexdigit(addr >> 12);
@@ -363,8 +435,6 @@ spi_erase_sector_interactive(void)
 	Serial.print(buf);
 }
 	
-
-
 static void
 spi_read(
 	uint32_t addr
@@ -376,10 +446,7 @@ spi_read(
 	//delay(1);
 
 	// read a page
-	spi_send(SPI_CMD_READ);
-	spi_send(addr >> 16);
-	spi_send(addr >>  8);
-	spi_send(addr >>  0);
+	spi_read_command(addr);
 
 	uint8_t data[16];
 
@@ -429,10 +496,7 @@ spi_dump(void)
 	while (1)
 	{
 		spi_cs(1);
-		spi_send(SPI_CMD_READ); // read
-		spi_send(addr >> 16);
-		spi_send(addr >>  8);
-		spi_send(addr >>  0);
+		spi_read_command(addr);
 
 		for (uint8_t off = 0 ; off < sizeof(buf) ; off++)
 			buf[off] = spi_send(0);
@@ -465,10 +529,7 @@ prom_send(void)
 	while (1)
 	{
 		spi_cs(1);
-		spi_send(SPI_CMD_READ); // read
-		spi_send(addr >> 16);
-		spi_send(addr >>  8);
-		spi_send(addr >>  0);
+		spi_read_command(addr);
 
 		for (uint8_t off = 0 ; off < sizeof(xmodem_block.data) ; off++)
 			xmodem_block.data[off] = spi_send(0);
@@ -503,6 +564,8 @@ spi_upload(void)
 	
 	outbuf[off++] = fail ? '!' : 'G';
 	outbuf[off++] = ' ';
+	outbuf[off++] = hexdigit(addr >> 28);
+	outbuf[off++] = hexdigit(addr >> 24);
 	outbuf[off++] = hexdigit(addr >> 20);
 	outbuf[off++] = hexdigit(addr >> 16);
 	outbuf[off++] = hexdigit(addr >> 12);
@@ -601,6 +664,8 @@ spi_upload(void)
 			off = 0;
 			outbuf[off++] = '\r';
 			outbuf[off++] = '\n';
+			outbuf[off++] = hexdigit(addr >> 28);
+			outbuf[off++] = hexdigit(addr >> 24);
 			outbuf[off++] = hexdigit(addr >> 20);
 			outbuf[off++] = hexdigit(addr >> 16);
 			outbuf[off++] = hexdigit(addr >> 12);
@@ -630,10 +695,8 @@ spi_upload(void)
 		// read the flash and compare it to the buffer
 		bool matched = true;
 		spi_cs(1);
-		spi_send(SPI_CMD_READ); // read
-		spi_send(addr >> 16);
-		spi_send(addr >>  8);
-		spi_send(addr >>  0);
+		spi_read_command(addr);
+
 		for (uint16_t i = 0 ; i < chunk_size; i++)
 		{
 			uint8_t rom = spi_send(0);
@@ -679,10 +742,7 @@ spi_upload(void)
 			(void) r2; // unused
 
 			spi_cs(1);
-			spi_send(SPI_CMD_PP); // write
-			spi_send((addr+i) >> 16);
-			spi_send((addr+i) >>  8);
-			spi_send((addr+i) >>  0);
+			spi_write_command(addr+i);
 			
 			for (uint16_t j = 0 ; j < 256 ; j++)
 				spi_send(buf[i+j]);
@@ -717,6 +777,8 @@ static const char usage[] =
 " x           Read the status register\r\n"
 " t           Tri-state the pins to release the bus\r\n"
 " g           Read security resgister\r\n"
+" b           Read the bank address register\r\n"
+" BX          Write the bank address register\r\n"
 "\r\n"
 "To read the entire ROM, start an x-modem transfer.\r\n"
 "\r\n";
@@ -758,6 +820,26 @@ loop()
 		uint8_t sr = usb_serial_readhex();
 		spi_write_status(sr);
 		spi_status_interactive();
+		break;
+	}
+
+	case 'b':
+	{
+		// read the bank address register for large chips
+		spi_bank_address_register_interactive();
+		break;
+	}
+
+	case 'B':
+	{
+		// set the bank address register
+		uint8_t brac = usb_serial_readhex();
+		spi_cs(1);
+		spi_send(SPI_CMD_BRWR);
+		spi_send(brac);
+		spi_cs(0);
+
+		spi_bank_address_register_interactive();
 		break;
 	}
 
