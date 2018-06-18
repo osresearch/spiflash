@@ -49,7 +49,10 @@ SPI (spd ckp ske smp csl hiz)=( 4 0 1 0 1 0 )
  */
 #include <SPI.h>
 #include "xmodem.h"
+
+#ifdef CONFIG_SKETCHSAVER
 #include "SketchSaver/SketchSaver.h"
+#endif
 
 #if 1
 // teensy 3 pins
@@ -843,9 +846,11 @@ loop()
 		break;
 	}
 
+#ifdef CONFIG_SKETCHSAVER
 	case 'S':
 		sketch_output();
 		break;
+#endif
 
 	case 't':
 		pinMode(SPI_CS, INPUT);
